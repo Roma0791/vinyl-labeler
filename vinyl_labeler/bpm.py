@@ -90,7 +90,7 @@ def from_getsongbpm(api_key: str, artist: str, title: str) -> dict | None:
     if not tempo:
         return None
     return {
-        "bpm": float(tempo),
+        "bpm": round(float(tempo)),
         "source": "getsongbpm",
         "confidence": "medium",
         "matched_title": top.get("title"),
@@ -152,7 +152,7 @@ def from_audio_sample(audio_path: str) -> dict | None:
         return None
     best_lag = min_lag + int(np.argmax(window))
     bpm = 60.0 * frame_rate / best_lag
-    return {"bpm": round(bpm, 1), "source": "audio_analysis", "confidence": "high"}
+    return {"bpm": round(bpm), "source": "audio_analysis", "confidence": "high"}
 
 
 def resolve_bpm(track: dict, artist: str, getsongbpm_key: str,

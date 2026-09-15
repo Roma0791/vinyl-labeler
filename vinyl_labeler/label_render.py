@@ -209,10 +209,11 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         bpm = t.get("bpm")
         if bpm is None:
             bpm_str = "--"
-        elif t.get("bpm_source") in (None, "none"):
-            bpm_str = f"{bpm}?"
         else:
-            bpm_str = f"{bpm}"
+            # Always whole numbers on the label, regardless of what's
+            # actually stored (older catalogue entries, manual entry).
+            bpm = round(bpm)
+            bpm_str = f"{bpm}?" if t.get("bpm_source") in (None, "none") else f"{bpm}"
 
         bpm_w = draw.textlength(bpm_str, font=p["bpm_font"])
         detail_max_w = usable_width - bpm_w - _gap(s["detail_font_size"])

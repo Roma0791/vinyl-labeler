@@ -534,12 +534,11 @@ function renderTracks() {
         <button class="secondary small tapToggle" data-i="${i}">⏱ Tap tempo</button>
         <button class="secondary small audioSampleBtn" data-i="${i}">🎙️ Analyze audio sample</button>
       </div>
-      <!-- No capture attribute: iOS Safari's audio capture support is
-      broken/incomplete and silently falls back to the video camera despite
-      accept=audio/* -- a known, longstanding platform limitation, not
-      fixable with different HTML. Plain accept=audio/* gives a normal
-      file picker instead (record in Voice Memos first, then pick it here). -->
-      <input type="file" id="audioSample${i}" data-i="${i}" accept="audio/*" class="hidden">
+      <!-- capture opens the recorder directly (skips a picker menu) even
+      though iOS routes accept=audio/* through the video camera UI --
+      ffmpeg decodes the audio track out of whatever container comes back,
+      so the video itself is simply discarded server-side, never stored. -->
+      <input type="file" id="audioSample${i}" data-i="${i}" accept="audio/*" capture class="hidden">
       <div class="tap-panel hidden" id="tapPanel${i}"></div>
     `;
     container.appendChild(div);
@@ -562,7 +561,7 @@ function renderTracks() {
   // the real tempo -- these just scale whatever's currently in the field ----
   function scaleBpm(i, factor) {
     if (record.tracks[i].bpm == null) return;
-    record.tracks[i].bpm = Math.round(record.tracks[i].bpm * factor * 10) / 10;
+    record.tracks[i].bpm = Math.round(record.tracks[i].bpm * factor);
     record.tracks[i].bpm_source = 'manual';
     renderTracks();
   }
