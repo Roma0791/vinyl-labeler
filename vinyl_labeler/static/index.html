@@ -36,17 +36,17 @@
   .track-row { display: flex; gap: 8px; align-items: center; }
   .track-row input[type=text] { flex: 1; margin-bottom: 0; }
   .track-row input[type=number] { width: 90px; margin-bottom: 0; }
+  .track-row input[type=number].bpm-missing { background: #fee2e2; border-color: #fca5a5; }
   .badge { display: inline-block; font-size: .72rem; padding: 2px 8px; border-radius: 999px;
            margin: 4px 0; }
   .badge.high { background: #dcfce7; color: #166534; }
   .badge.medium { background: #fef9c3; color: #854d0e; }
   .badge.unconfirmed { background: #fee2e2; color: #991b1b; }
-  .warn { background: #fee2e2; color: #991b1b; padding: 8px; border-radius: 8px;
-          font-size: .85rem; margin: 6px 0; }
+  .bpm-controls { margin-top: 8px; }
   .tap-panel { background: #f9fafb; border-radius: 8px; padding: 10px; margin-top: 8px; }
   .tap-btn { background: #16a34a; font-size: 1.4rem; padding: 22px; }
   .tap-bpm { font-size: 1.6rem; text-align: center; margin: 8px 0; font-weight: bold; }
-  .highlight-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: .85rem; }
+  .highlight-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: .85rem; }
   .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   #previewImg { width: 100%; border: 1px solid #ddd; border-radius: 8px; margin-top: 8px;
                 background: #fff repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
@@ -212,6 +212,12 @@ let record = null;
 // this was supposed to update an existing entry -- producing a stray
 // duplicate catalogue row instead of updating the one being edited.
 let editingCatalogNumber = null;
+// Index of the track whose BPM controls (source badge, octave buttons, tap
+// tempo, audio sample, Beatport link) are currently expanded, or null if
+// none are -- they're collapsed by default per track to keep the tracklist
+// scannable, and only one track's worth is shown at a time so switching
+// tracks doesn't leave several sections open and sprawling.
+let expandedBpmTrack = null;
 
 const $ = (id) => document.getElementById(id);
 const spinner = $('spinner');
@@ -560,6 +566,7 @@ function resetNewRecordForm() {
   // trips to the Library tab just to confirm the previous one went through.
   record = null;
   editingCatalogNumber = null;
+  expandedBpmTrack = null;
   lastPhotoFile = null;
   reviewArea.classList.add('hidden');
   $('fArtist').value = '';
@@ -581,6 +588,7 @@ function resetNewRecordForm() {
 }
 
 function renderReview() {
+  expandedBpmTrack = null;  // fresh record (new photo, manual entry, edit load) -- start all collapsed
   $('fArtist').value = record.artist || '';
   $('fTitle').value = record.release_title || '';
   $('fCatno').value = record.catalog_number || '';
@@ -594,6 +602,40 @@ function renderReview() {
   reviewArea.classList.remove('hidden');
 }
 
+// Expand/collapse is a plain class toggle rather than a re-render, so
+// switching between tracks is instant with no flash of the rest of the
+// tracklist rebuilding.
+function setExpandedBpmTrack(i) {
+  if (expandedBpmTrack === i) return;
+  if (expandedBpmTrack !== null) {
+    const prev = $('bpmControls' + expandedBpmTrack);
+    if (prev) prev.classList.add('hidden');
+  }
+  expandedBpmTrack = i;
+  if (i !== null) {
+    const cur = $('bpmControls' + i);
+    if (cur) cur.classList.remove('hidden');
+  }
+}
+
+// Attached once to the container (which survives renderTracks()'s
+// innerHTML rebuilds -- only its children get replaced) rather than
+// per-track, so it doesn't need re-wiring on every render. Tapping into
+// the BPM field expands that track's controls and collapses whichever
+// other track was open; tapping any other field on a *different* track
+// (position/title/highlight) just collapses the open one, since that's
+// "moved on to another track" without asking to see BPM controls for it.
+$('tracksContainer').addEventListener('focusin', (e) => {
+  const trackDiv = e.target.closest('.track');
+  if (!trackDiv) return;
+  const i = +trackDiv.dataset.i;
+  if (e.target.matches('input[data-f=bpm]')) {
+    setExpandedBpmTrack(i);
+  } else if (expandedBpmTrack !== null && expandedBpmTrack !== i) {
+    setExpandedBpmTrack(null);
+  }
+});
+
 function renderTracks() {
   const container = $('tracksContainer');
   container.innerHTML = '';
@@ -602,33 +644,36 @@ function renderTracks() {
     div.className = 'track';
 
     const needsAttention = t.bpm === null || t.bpm === undefined || t.bpm_source === 'none';
+    const expanded = expandedBpmTrack === i;
+    div.dataset.i = i;
     div.innerHTML = `
-      ${needsAttention ? '<div class="warn">⚠ BPM not found -- enter manually or tap it below</div>' : ''}
-      <div class="track-row">
-        <input type="text" value="${t.position || ''}" style="max-width:60px" data-f="position" data-i="${i}">
-        <input type="text" value="${(t.title || '').replace(/"/g,'&quot;')}" data-f="title" data-i="${i}">
-        <input type="number" step="0.1" value="${t.bpm ?? ''}" placeholder="bpm" data-f="bpm" data-i="${i}">
-      </div>
-      <span class="badge ${bpmBadge(t)}">${t.bpm_source || 'none'}</span>
-      ${t.beatport_check_url ? `<a href="${t.beatport_check_url}" target="_blank" style="font-size:.78rem; margin-left:8px;">check on Beatport ↗</a>` : ''}
-      <div class="row2" style="margin-top:6px;">
-        <button class="secondary small halveBpmBtn" data-i="${i}" title="Halve the BPM (detected double the actual tempo)">½× halve</button>
-        <button class="secondary small doubleBpmBtn" data-i="${i}" title="Double the BPM (detected half the actual tempo)">×2 double</button>
-      </div>
       <div class="highlight-row">
         <input type="checkbox" id="highlight-${i}" ${t.highlight ? 'checked' : ''} data-f="highlight" data-i="${i}">
         <label for="highlight-${i}" style="margin:0; display:inline;">Highlight (bold on label)</label>
       </div>
-      <div class="row2">
-        <button class="secondary small tapToggle" data-i="${i}">⏱ Tap tempo</button>
-        <button class="secondary small audioSampleBtn" data-i="${i}">🎙️ Analyze audio sample</button>
+      <div class="track-row">
+        <input type="text" value="${t.position || ''}" style="max-width:60px" data-f="position" data-i="${i}">
+        <input type="text" value="${(t.title || '').replace(/"/g,'&quot;')}" data-f="title" data-i="${i}">
+        <input type="number" step="0.1" value="${t.bpm ?? ''}" placeholder="bpm" data-f="bpm" data-i="${i}" class="${needsAttention ? 'bpm-missing' : ''}">
       </div>
-      <!-- capture opens the recorder directly (skips a picker menu) even
-      though iOS routes accept=audio/* through the video camera UI --
-      ffmpeg decodes the audio track out of whatever container comes back,
-      so the video itself is simply discarded server-side, never stored. -->
-      <input type="file" id="audioSample${i}" data-i="${i}" accept="audio/*" capture class="hidden">
-      <div class="tap-panel hidden" id="tapPanel${i}"></div>
+      <div class="bpm-controls ${expanded ? '' : 'hidden'}" id="bpmControls${i}">
+        <span class="badge ${bpmBadge(t)}">${t.bpm_source || 'none'}</span>
+        <div class="row2" style="margin-top:6px;">
+          <button class="secondary small halveBpmBtn" data-i="${i}" title="Halve the BPM (detected double the actual tempo)">½× halve</button>
+          <button class="secondary small doubleBpmBtn" data-i="${i}" title="Double the BPM (detected half the actual tempo)">×2 double</button>
+        </div>
+        <div class="row2" style="margin-top:6px;">
+          <button class="secondary small tapToggle" data-i="${i}">⏱ Tap tempo</button>
+          <button class="secondary small audioSampleBtn" data-i="${i}">🎙️ Analyze audio sample</button>
+        </div>
+        <!-- capture opens the recorder directly (skips a picker menu) even
+        though iOS routes accept=audio/* through the video camera UI --
+        ffmpeg decodes the audio track out of whatever container comes back,
+        so the video itself is simply discarded server-side, never stored. -->
+        <input type="file" id="audioSample${i}" data-i="${i}" accept="audio/*" capture class="hidden">
+        <div class="tap-panel hidden" id="tapPanel${i}"></div>
+        ${t.beatport_check_url ? `<a href="${t.beatport_check_url}" target="_blank" style="font-size:.78rem; display:inline-block; margin-top:8px;">check on Beatport ↗</a>` : ''}
+      </div>
     `;
     container.appendChild(div);
   });
