@@ -19,6 +19,7 @@ neutral proportions. It ships as a single variable-weight file, so weight
 is chosen via a font variation axis instead of loading separate
 regular/bold files.
 """
+import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -113,6 +114,50 @@ def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
     return [" ".join(line) for line in lines]
 
 
+def _split_song_and_variant(title: str):
+    """Splits a Discogs-style "Song Name (Remix Name)" title into
+    ("Song Name", "Remix Name"). Returns (None, None) if the title has no
+    trailing parenthetical."""
+    m = re.match(r"^(.*?)\s*\(([^()]+)\)\s*$", title or "")
+    if not m:
+        return None, None
+    return m.group(1).strip(), m.group(2).strip()
+
+
+def _display_titles(tracks: list, release_title: str) -> list:
+    """A multi-mix 12" (several remixes of the same song) gets titles from
+    Discogs like "Release Your Mind (Beep-Bop Mix)" on every track -- the
+    song name repeats, and at label-line widths the fixed-width truncation
+    eats the actual distinguishing part (the remix name) rather than the
+    song name, which is redundant with itself track-to-track (and often
+    with the release title already printed in the header above). Confirmed
+    live: Syke 'n' Sugarstarr -- Release Your Mind (CITY 1054), 4 tracks,
+    every title truncated down to "Release Your Mind (Beep-Bop ..." with
+    the remix name never making it onto the label at all.
+
+    When a track's song-name prefix is shared with 2+ other tracks, or
+    matches the release title, it's redundant on that line -- this drops
+    it and keeps just the remix/mix name. Titles with no "Song (Variant)"
+    shape, or whose variant isn't shared/redundant, are returned as-is."""
+    def norm(s):
+        return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+    parsed = [_split_song_and_variant(t.get("title", "")) for t in tracks]
+    counts = {}
+    for base, variant in parsed:
+        if base and variant:
+            counts[norm(base)] = counts.get(norm(base), 0) + 1
+    release_norm = norm(release_title)
+
+    out = []
+    for t, (base, variant) in zip(tracks, parsed):
+        if base and variant and (counts.get(norm(base), 0) >= 2 or norm(base) == release_norm):
+            out.append(variant)
+        else:
+            out.append(t.get("title") or "")
+    return out
+
+
 def highlights_only(tracks: list) -> list:
     """For the "highlighted tracks only" print option -- keeps just the
     tracks flagged highlight=True, e.g. the two cuts worth playing off a
@@ -161,7 +206,16 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     # caller before this function ever sees the record), so a hidden
     # track's genre is naturally excluded too.
     genre_font = _font("regular", s["genre_font_size"])
-    genre_text = "/".join(t["genre"] for t in tracks if t.get("genre")).upper()
+    genre_values = [t["genre"].strip() for t in tracks if t.get("genre") and t["genre"].strip()]
+    # Most EPs/singles run one style across every track (Discogs' styles
+    # list is release-level to begin with -- see
+    # discogs.distribute_styles_to_tracks) -- printing "HOUSE/HOUSE/HOUSE"
+    # wastes the width for no information; print it once instead when
+    # every visible track agrees.
+    if genre_values and len({g.lower() for g in genre_values}) == 1:
+        genre_text = genre_values[0].upper()
+    else:
+        genre_text = "/".join(genre_values).upper()
     genre_text = _truncate_to_width(draw, genre_text, genre_font, usable_width)
 
     release_title_font = _font("regular", s["release_title_font_size"])
@@ -186,14 +240,17 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     def row_kind(t):
         return "bold" if (t.get("highlight") and s["highlight_bold"]) else "regular"
 
+    display_titles = _display_titles(tracks, record.get("release_title", ""))
+
     row_plan = []
-    for t in tracks:
+    for t, display_title in zip(tracks, display_titles):
         kind = row_kind(t)
         detail_font = _font(kind, s["detail_font_size"])
         bpm_font = _font(kind, s["bpm_font_size"])
         row_h = max(_line_height(s["detail_font_size"]), _line_height(s["bpm_font_size"])) \
             + _gap(s["bpm_font_size"])
-        row_plan.append({"track": t, "detail_font": detail_font, "bpm_font": bpm_font, "row_h": row_h})
+        row_plan.append({"track": t, "display_title": display_title, "detail_font": detail_font,
+                          "bpm_font": bpm_font, "row_h": row_h})
 
     # ---- now that every size is known, compute total height and render ----
     header_h = MARGIN_PX
@@ -215,7 +272,7 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     for p in row_plan:
         t = p["track"]
         pos = t.get("position") or ""
-        title = t.get("title") or ""
+        title = p["display_title"]
         bpm = t.get("bpm")
         if bpm is None:
             bpm_str = "--"

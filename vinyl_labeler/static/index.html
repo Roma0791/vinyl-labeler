@@ -123,6 +123,10 @@
   </div>
   <button class="secondary small hidden" id="retryIdentifyBtn" style="width:100%;">🔁 Retry photo with selected model</button>
 
+  <div class="check-row" style="justify-content:center; margin-top:8px;">
+    <input type="checkbox" id="debugRetainPhotos"> <label for="debugRetainPhotos" style="color:#999; font-size:.8rem;">🐛 Keep last photos on server (bugfixing)</label>
+  </div>
+
   <button class="secondary small" id="manualEntryBtn" style="width:100%; margin-top:10px;">✏️ White label -- enter manually</button>
   <div id="manualEntryForm" class="hidden" style="margin-top:10px;">
     <label>Artist</label>
@@ -418,6 +422,18 @@ $('visionModelToggle').addEventListener('change', () => {
   const sonnet = $('visionModelToggle').checked;
   $('modelLabelHaiku').classList.toggle('active', !sonnet);
   $('modelLabelSonnet').classList.toggle('active', sonnet);
+});
+
+// ---- debug: retain last couple of uploaded photos on the server for
+// bugfixing (off by default; server keeps it in memory, resets on restart) ----
+fetch('/debug/retain-photos').then(r => r.json()).then(s => {
+  $('debugRetainPhotos').checked = !!s.retain_photos;
+}).catch(() => {});
+
+$('debugRetainPhotos').addEventListener('change', () => {
+  const fd = new FormData();
+  fd.append('enabled', $('debugRetainPhotos').checked);
+  fetch('/debug/retain-photos', { method: 'POST', body: fd }).catch(() => {});
 });
 
 async function runIdentify(file) {

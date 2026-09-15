@@ -19,7 +19,9 @@ localhost) and setting up a cert for a LAN IP is unnecessary friction here.
 import base64
 import io
 import json
+import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
@@ -65,6 +67,36 @@ def list_label_sizes():
 
 ALLOWED_VISION_MODELS = {"claude-haiku-4-5", "claude-sonnet-5"}
 
+# Debug switch (off by default, in-memory only -- resets on server
+# restart): while iterating on a specific record's bugs, keeping the last
+# couple of uploaded photos on disk means Claude can Read them straight
+# off the Mac instead of you re-transferring the same photo by hand each
+# time. Normal operation is unaffected -- the upload is still discarded
+# right after the vision call unless this is switched on.
+DEBUG_PHOTOS_DIR = Path.home() / ".vinyl_labeler" / "debug_photos"
+DEBUG_PHOTOS_KEEP = 2
+_debug_state = {"retain_photos": False}
+
+
+def _retain_debug_photo(tmp_path: Path, suffix: str) -> None:
+    DEBUG_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = DEBUG_PHOTOS_DIR / f"{int(time.time() * 1000)}{suffix}"
+    shutil.copy2(tmp_path, dest)
+    kept = sorted(DEBUG_PHOTOS_DIR.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for stale in kept[DEBUG_PHOTOS_KEEP:]:
+        stale.unlink(missing_ok=True)
+
+
+@app.get("/debug/retain-photos")
+def get_debug_retain_photos():
+    return _debug_state
+
+
+@app.post("/debug/retain-photos")
+def set_debug_retain_photos(enabled: bool = Form(...)):
+    _debug_state["retain_photos"] = enabled
+    return _debug_state
+
 
 @app.post("/identify")
 async def identify_photo(photo: UploadFile = File(...), model: str = Form(None)):
@@ -83,6 +115,8 @@ async def identify_photo(photo: UploadFile = File(...), model: str = Form(None))
             tmp_path, cfg.anthropic_api_key, vision_model, cfg.anthropic_workspace_id,
         )
     finally:
+        if _debug_state["retain_photos"]:
+            _retain_debug_photo(tmp_path, suffix)
         tmp_path.unlink(missing_ok=True)
 
     for t in record.get("tracks", []):
