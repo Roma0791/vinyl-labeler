@@ -2,8 +2,17 @@
 Print queue: JSON-file-backed list of label jobs deferred for later (e.g.
 the QL-570 is out of tape). Separate from store.py's catalogue -- that's
 keyed one-entry-per-catalog_number, while the queue is an ordered list of
-print JOBS (a job carries the label_size/style/highlights_only choices
-alongside the record, since those are what actually gets printed).
+print JOBS (label_size/style/highlights_only -- the choices that actually
+affect what gets printed).
+
+A job stores a catalog_number REFERENCE, not a snapshot of the record --
+the record itself is always saved to the catalogue at enqueue time (see
+server.py's /queue endpoint) and dereferenced live at print time. This is
+deliberate: a stored snapshot would go stale the moment someone edits the
+record via the Library tab before it's actually printed, and silently
+printing/showing the old data would be worse than the sync bug it was
+meant to avoid. With a reference, an edit just works -- there's nothing
+to keep in sync because there's only one copy of the data.
 
 Same file-per-collection-scale assumption as store.py: a personal queue
 is at most a handful to a few dozen deep, so a plain read-modify-write
@@ -31,12 +40,12 @@ def list_jobs(queue_path: Path) -> list:
     return _load(queue_path)
 
 
-def enqueue(queue_path: Path, record: dict, label_size: str, style: dict,
+def enqueue(queue_path: Path, catalog_number: str, label_size: str, style: dict,
             highlights_only: bool) -> dict:
     jobs = _load(queue_path)
     job = {
         "id": uuid.uuid4().hex,
-        "record": record,
+        "catalog_number": catalog_number,
         "label_size": label_size,
         "style": style or {},
         "highlights_only": highlights_only,

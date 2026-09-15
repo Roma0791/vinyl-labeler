@@ -39,6 +39,7 @@ FONT_VARIATION = {"regular": b"Regular", "bold": b"Bold"}
 DEFAULT_STYLE = {
     "artist_font_size": 79,         # "Frankie Knuckles" ~= 80% of a 62mm label's width, bold
     "release_title_font_size": 43,  # "– Baby Wants To Ride EP" -- 0.55x the artist size
+    "genre_font_size": 39,          # release_title_font_size - 4 -- it kept running out of room
     "catno_font_size": 17,          # 0.22x the artist size
     "detail_font_size": 48,         # "A1  Baby Wants To Ride" ~= 65% width, bold
     "bpm_font_size": 77,            # 1.6x the detail size
@@ -138,34 +139,43 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     img = Image.new("1", (width, 1), color=1)  # placeholder height; resized once content is known
     draw = ImageDraw.Draw(img)
 
-    # ---- header block: artist (big) / "– release title" (word-wrapped,
-    # widow-avoided) / catalog number (small) -- all at fixed sizes ----
-    artist = record.get("artist", "") or ""
+    # ---- header block: genre (small, right-aligned, on top) / artist
+    # (big, up to 2 lines) / "– release title" (word-wrapped, widow-
+    # avoided) / catalog number (small) -- all at fixed sizes. " / " is
+    # tightened to "/" throughout to save width -- Discogs' multi-artist/
+    # multi-part-title convention ("Tony Thomas / Mastik Soul") is wordy
+    # for a label this size. ----
+    artist = (record.get("artist", "") or "").replace(" / ", "/")
     artist_font = _font("bold", s["artist_font_size"])
-    artist = _truncate_to_width(draw, artist, artist_font, usable_width)
+    artist_lines = _wrap_text(draw, artist, artist_font, usable_width)
+    if len(artist_lines) > 2:
+        artist_lines = [artist_lines[0], " ".join(artist_lines[1:])]
+    if len(artist_lines) == 2:
+        artist_lines[1] = _truncate_to_width(draw, artist_lines[1], artist_font, usable_width)
 
-    # Genre, right-aligned above the release-title line: one entry per
-    # visible track (positionally mapped from Discogs' styles list -- see
+    # Genre, right-aligned above everything else: one entry per visible
+    # track (positionally mapped from Discogs' styles list -- see
     # discogs.distribute_styles_to_tracks), joined in track order with "/"
     # and no spaces. `tracks` here is already whatever's actually being
     # printed (_skip_on_label filtered, and highlights_only filtered by the
     # caller before this function ever sees the record), so a hidden
     # track's genre is naturally excluded too.
-    genre_font = _font("regular", s["release_title_font_size"])
+    genre_font = _font("regular", s["genre_font_size"])
     genre_text = "/".join(t["genre"] for t in tracks if t.get("genre")).upper()
     genre_text = _truncate_to_width(draw, genre_text, genre_font, usable_width)
 
     release_title_font = _font("regular", s["release_title_font_size"])
-    release_title_text = f"– {record.get('release_title', '')}".strip()
+    release_title_text = f"– {record.get('release_title', '')}".replace(" / ", "/").strip()
     release_title_lines = _wrap_text(draw, release_title_text, release_title_font, usable_width)
 
     catno = record.get("catalog_number") or ""
     catno_font = _font("regular", s["catno_font_size"])
     catno = _truncate_to_width(draw, catno, catno_font, usable_width)
 
-    header_lines = [(artist, artist_font, s["artist_font_size"], "left")]
+    header_lines = []
     if genre_text:
-        header_lines.append((genre_text, genre_font, s["release_title_font_size"], "right"))
+        header_lines.append((genre_text, genre_font, s["genre_font_size"], "right"))
+    header_lines += [(line, artist_font, s["artist_font_size"], "left") for line in artist_lines]
     header_lines += [(line, release_title_font, s["release_title_font_size"], "left")
                       for line in release_title_lines]
     if catno:

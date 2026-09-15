@@ -39,9 +39,13 @@ def get(catalogue_path: Path, catalog_number: str) -> dict | None:
     return load_all(catalogue_path).get(catalog_number)
 
 
-def upsert(catalogue_path: Path, record: dict) -> dict:
+def upsert(catalogue_path: Path, record: dict, count_as_print: bool = True) -> dict:
     """Insert or update by catalog_number. Returns the stored entry
-    (record plus first_processed_at/last_processed_at/print_count)."""
+    (record plus first_processed_at/last_processed_at/print_count).
+
+    count_as_print=False saves/updates the data (e.g. so it's editable via
+    the Library tab) without bumping print_count or last_processed_at --
+    used when queuing a print for later, since queuing isn't printing."""
     catno = record.get("catalog_number")
     if not catno:
         raise ValueError("Record has no catalog_number -- can't be saved to the catalogue.")
@@ -53,8 +57,12 @@ def upsert(catalogue_path: Path, record: dict) -> dict:
 
     entry = dict(record)
     entry["first_processed_at"] = existing["first_processed_at"] if existing else now
-    entry["last_processed_at"] = now
-    entry["print_count"] = existing.get("print_count", 0) + 1 if existing else 1
+    if count_as_print:
+        entry["last_processed_at"] = now
+        entry["print_count"] = existing.get("print_count", 0) + 1 if existing else 1
+    else:
+        entry["last_processed_at"] = existing.get("last_processed_at") if existing else None
+        entry["print_count"] = existing.get("print_count", 0) if existing else 0
 
     all_records[catno] = entry
     catalogue_path.write_text(json.dumps(all_records, indent=2))

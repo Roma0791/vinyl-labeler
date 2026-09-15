@@ -243,10 +243,11 @@ function renderLibraryRows(rows) {
     const card = document.createElement('div');
     card.className = 'lib-card';
     const when = r.last_processed_at ? new Date(r.last_processed_at).toLocaleDateString() : '—';
+    const printedText = r.print_count > 0 ? `Printed ${r.print_count}×` : 'Not yet printed';
     card.innerHTML = `
       <div class="lib-title">${r.artist || '(unknown artist)'} – ${r.release_title || '(untitled)'}</div>
       <div class="lib-sub">${r.catalog_number || ''} · ${r.track_count} track${r.track_count === 1 ? '' : 's'}</div>
-      <div class="lib-meta"><span>Last printed ${when}</span><span>Printed ${r.print_count}×</span></div>
+      <div class="lib-meta"><span>Last printed ${when}</span><span>${printedText}</span></div>
     `;
     card.addEventListener('click', () => loadRecordForEdit(r.catalog_number));
     container.appendChild(card);
@@ -276,23 +277,39 @@ function renderQueueRows(jobs) {
   $('queueEmptyNote').classList.toggle('hidden', jobs.length !== 0);
   $('printAllQueueBtn').classList.toggle('hidden', jobs.length === 0);
   jobs.forEach(job => {
-    const r = job.record || {};
+    const r = job.record;
     const card = document.createElement('div');
     card.className = 'lib-card';
     card.style.cursor = 'default';
     const queuedAt = job.queued_at ? new Date(job.queued_at).toLocaleString() : '';
+    if (!r) {
+      // Catalogue entry was deleted after this job was queued.
+      card.innerHTML = `
+        <div class="lib-title">⚠ Catalogue entry missing</div>
+        <div class="lib-sub">${job.catalog_number} · queued ${queuedAt} · was it deleted?</div>
+        <div class="row2" style="margin-top:8px;">
+          <button class="small danger removeQueueBtn" data-id="${job.id}">✕ Remove</button>
+        </div>
+      `;
+      container.appendChild(card);
+      return;
+    }
     card.innerHTML = `
       <div class="lib-title">${r.artist || '(unknown artist)'} – ${r.release_title || '(untitled)'}</div>
       <div class="lib-sub">${r.catalog_number || ''} · queued ${queuedAt}</div>
       <div class="row2" style="margin-top:8px;">
         <button class="small printQueueBtn" data-id="${job.id}">🖨️ Print</button>
-        <button class="small danger removeQueueBtn" data-id="${job.id}">✕ Remove</button>
+        <button class="small secondary editQueueBtn" data-catno="${r.catalog_number}">✏️ Edit</button>
       </div>
+      <button class="small danger removeQueueBtn" data-id="${job.id}" style="margin-top:6px;">✕ Remove</button>
     `;
     container.appendChild(card);
   });
   container.querySelectorAll('.printQueueBtn').forEach(btn => {
     btn.addEventListener('click', () => printQueueJob(btn.dataset.id));
+  });
+  container.querySelectorAll('.editQueueBtn').forEach(btn => {
+    btn.addEventListener('click', () => loadRecordForEdit(btn.dataset.catno));
   });
   container.querySelectorAll('.removeQueueBtn').forEach(btn => {
     btn.addEventListener('click', () => removeQueueJob(btn.dataset.id));

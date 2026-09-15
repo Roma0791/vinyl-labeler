@@ -260,13 +260,28 @@ class QueueRequest(BaseModel):
 
 @app.post("/queue")
 def enqueue_endpoint(req: QueueRequest):
+    # Saved to the catalogue right away (count_as_print=False -- queuing
+    # isn't printing) so it's editable via the Library tab immediately,
+    # not lost if the job is later removed from the queue without ever
+    # printing.
     record = _with_placeholder_catalog_number(req.record)
-    return queue_mod.enqueue(cfg.print_queue_path, record, req.label_size, req.style, req.highlights_only)
+    store.upsert(cfg.catalogue_path, record, count_as_print=False)
+    job = queue_mod.enqueue(cfg.print_queue_path, record["catalog_number"],
+                             req.label_size, req.style, req.highlights_only)
+    return {**job, "record": record}
+
+
+def _dereferenced_queue_jobs() -> list:
+    """Each job's record is looked up live from the catalogue rather than
+    stored in the job itself -- see print_queue.py's module docstring for
+    why. `record` is None if the catalogue entry was deleted since queuing."""
+    jobs = queue_mod.list_jobs(cfg.print_queue_path)
+    return [{**job, "record": store.get(cfg.catalogue_path, job["catalog_number"])} for job in jobs]
 
 
 @app.get("/queue")
 def list_queue():
-    return queue_mod.list_jobs(cfg.print_queue_path)
+    return _dereferenced_queue_jobs()
 
 
 @app.delete("/queue/{job_id}")
@@ -281,8 +296,12 @@ def print_queue_job(job_id: str):
     job = next((j for j in queue_mod.list_jobs(cfg.print_queue_path) if j["id"] == job_id), None)
     if not job:
         raise HTTPException(404, "Queue job not found")
+    record = store.get(cfg.catalogue_path, job["catalog_number"])
+    if not record:
+        queue_mod.remove(cfg.print_queue_path, job_id)
+        raise HTTPException(404, f"Catalogue entry {job['catalog_number']} no longer exists -- removed from queue.")
     try:
-        result = _print_job(job["record"], job["label_size"], job.get("style", {}), job.get("highlights_only", False))
+        result = _print_job(record, job["label_size"], job.get("style", {}), job.get("highlights_only", False))
     except Exception as e:
         raise HTTPException(500, f"Print failed: {e}")
     queue_mod.remove(cfg.print_queue_path, job_id)
@@ -291,13 +310,20 @@ def print_queue_job(job_id: str):
 
 @app.post("/queue/print-all")
 def print_all_queue():
-    """Prints every queued job in order. Stops at the first failure (e.g.
-    the printer runs out of tape again) so the rest stay queued rather
-    than being attempted and failing one by one."""
+    """Prints every queued job in order, using each job's current
+    catalogue data (so edits made after queuing are picked up). Stops at
+    the first failure (e.g. the printer runs out of tape again) so the
+    rest stay queued rather than being attempted and failing one by one."""
     results = []
     for job in queue_mod.list_jobs(cfg.print_queue_path):
+        record = store.get(cfg.catalogue_path, job["catalog_number"])
+        if not record:
+            queue_mod.remove(cfg.print_queue_path, job["id"])
+            results.append({"id": job["id"], "ok": False,
+                             "error": f"Catalogue entry {job['catalog_number']} no longer exists -- removed from queue."})
+            continue
         try:
-            result = _print_job(job["record"], job["label_size"], job.get("style", {}), job.get("highlights_only", False))
+            result = _print_job(record, job["label_size"], job.get("style", {}), job.get("highlights_only", False))
             queue_mod.remove(cfg.print_queue_path, job["id"])
             results.append({"id": job["id"], "ok": True, **result})
         except Exception as e:
@@ -318,9 +344,12 @@ def list_catalogue():
             "artist": rec.get("artist", ""),
             "release_title": rec.get("release_title", ""),
             "track_count": len(rec.get("tracks", [])),
-            "last_processed_at": rec.get("last_processed_at", ""),
+            "last_processed_at": rec.get("last_processed_at") or "",
             "print_count": rec.get("print_count", 0),
         })
+    # last_processed_at is None for a queued-but-never-printed record (see
+    # store.upsert's count_as_print=False path) -- sort key must not be
+    # None or this raises comparing against other rows' timestamp strings.
     rows.sort(key=lambda r: r["last_processed_at"], reverse=True)
     return rows
 
