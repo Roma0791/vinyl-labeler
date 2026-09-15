@@ -41,6 +41,7 @@ landscape, not a bug in this tool. Tiers, best to worst:
 
 Everything below writes {"bpm": float|None, "source": tier, "confidence": str}.
 """
+import re
 import subprocess
 import urllib.parse
 
@@ -61,17 +62,32 @@ def from_printed_label(track: dict) -> dict | None:
     return None
 
 
+def _normalize_artist(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
 def from_getsongbpm(api_key: str, artist: str, title: str) -> dict | None:
     """Verified live against api.getsong.co with a real key: a match
     returns {"search": [{...}]}, a miss returns {"search": {"error": "no
     result"}} -- a dict, not an empty list, which is why the type check
-    below matters."""
+    below matters.
+
+    Uses type=song with a plain title (no "song:"/"artist:" prefixes) --
+    the combined type=both "song:X artist:Y" syntax the docs describe
+    returns {"error": "no result"} even for a definitely-correct pair
+    (confirmed live against St Germain / Rose Rouge, an album with full
+    Discogs data). A title-only search reliably returns matches with each
+    result's artist, exactly like getsongbpm.com's own website search
+    behaves -- so this searches by title, then picks the result whose
+    artist matches, falling back to the top result if none do (a same-
+    titled track by a different artist is still a better guess than
+    nothing, same spirit as Discogs' artist_title fallback tier)."""
     if not api_key or not artist or not title:
         return None
     params = {
         "api_key": api_key,
-        "type": "both",
-        "lookup": f"song:{title} artist:{artist}",
+        "type": "song",
+        "lookup": title,
     }
     try:
         r = requests.get(f"{GETSONGBPM_BASE}/search/", params=params, timeout=10)
@@ -85,7 +101,12 @@ def from_getsongbpm(api_key: str, artist: str, title: str) -> dict | None:
     results = data.get("search")
     if not isinstance(results, list) or not results:
         return None
-    top = results[0]
+
+    target = _normalize_artist(artist)
+    top = next(
+        (r for r in results if _normalize_artist(r.get("artist", {}).get("name", "")) == target),
+        results[0],
+    )
     tempo = top.get("tempo")
     if not tempo:
         return None
