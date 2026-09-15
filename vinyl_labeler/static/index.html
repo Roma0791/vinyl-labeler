@@ -558,6 +558,40 @@ function bpmBadge(track) {
   return 'unconfirmed';
 }
 
+// Mirrors label_render._split_song_and_variant / _display_titles in
+// Python -- same "Song Name (Remix Name)" collapsing, applied here so the
+// track list in the review screen doesn't show the same repeated,
+// redundant song name in every narrow title box (all four mixes of a
+// 12" truncate to the identical "Release Your Mind (Beep-B..." prefix,
+// exactly where they need to look different to tell apart). This only
+// changes what's *displayed* -- the underlying record.tracks[i].title
+// always holds the full Discogs title; see the title input's focus/blur
+// handling in renderTracks(), which swaps in the full title to edit and
+// re-collapses it on blur, so editing is never done against the
+// shortened text and a save never loses the song name.
+function splitSongAndVariant(title) {
+  const m = /^(.*?)\s*\(([^()]+)\)\s*$/.exec(title || '');
+  if (!m) return [null, null];
+  return [m[1].trim(), m[2].trim()];
+}
+
+function computeDisplayTitles(tracks, releaseTitle) {
+  const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const parsed = tracks.map(t => splitSongAndVariant(t.title || ''));
+  const counts = {};
+  parsed.forEach(([base, variant]) => {
+    if (base && variant) counts[norm(base)] = (counts[norm(base)] || 0) + 1;
+  });
+  const releaseNorm = norm(releaseTitle);
+  return tracks.map((t, idx) => {
+    const [base, variant] = parsed[idx];
+    if (base && variant && (counts[norm(base)] >= 2 || norm(base) === releaseNorm)) {
+      return variant;
+    }
+    return t.title || '';
+  });
+}
+
 function resetNewRecordForm() {
   // Called after a real commit (print or queue -- not dry-run, which is
   // just previewing) so the New Record tab is clean for the next physical
@@ -639,6 +673,7 @@ $('tracksContainer').addEventListener('focusin', (e) => {
 function renderTracks() {
   const container = $('tracksContainer');
   container.innerHTML = '';
+  const displayTitles = computeDisplayTitles(record.tracks || [], record.release_title || '');
   (record.tracks || []).forEach((t, i) => {
     const div = document.createElement('div');
     div.className = 'track';
@@ -653,7 +688,7 @@ function renderTracks() {
       </div>
       <div class="track-row">
         <input type="text" value="${t.position || ''}" style="max-width:60px" data-f="position" data-i="${i}">
-        <input type="text" value="${(t.title || '').replace(/"/g,'&quot;')}" data-f="title" data-i="${i}">
+        <input type="text" value="${(displayTitles[i] || '').replace(/"/g,'&quot;')}" data-f="title" data-i="${i}" class="titleInput">
         <input type="number" step="0.1" value="${t.bpm ?? ''}" placeholder="bpm" data-f="bpm" data-i="${i}" class="${needsAttention ? 'bpm-missing' : ''}">
       </div>
       <div class="bpm-controls ${expanded ? '' : 'hidden'}" id="bpmControls${i}">
@@ -687,6 +722,28 @@ function renderTracks() {
       if (f === 'highlight') val = e.target.checked;
       record.tracks[i][f] = val;
       if (f === 'bpm') record.tracks[i].bpm_source = 'manual';
+    });
+  });
+
+  // The title field displays the shortened (redundant-song-name-dropped)
+  // version by default -- swap in the real, full title on focus so
+  // editing is always against the actual value (never risks saving the
+  // shortened text as if it were the whole title), then collapse it back
+  // down on blur. record.tracks[i].title is written directly here rather
+  // than relying on the generic 'change' listener above to have already
+  // run first -- correct either way, but this doesn't depend on event
+  // ordering between the two.
+  container.querySelectorAll('input.titleInput').forEach(inp => {
+    inp.addEventListener('focus', (e) => {
+      const i = +e.target.dataset.i;
+      e.target.value = record.tracks[i].title || '';
+      e.target.select();
+    });
+    inp.addEventListener('blur', (e) => {
+      const i = +e.target.dataset.i;
+      record.tracks[i].title = e.target.value;
+      const shortened = computeDisplayTitles(record.tracks, record.release_title || '');
+      e.target.value = shortened[i];
     });
   });
 
