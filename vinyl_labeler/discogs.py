@@ -101,6 +101,12 @@ class DiscogsClient:
         r.raise_for_status()
         return r.json()
 
+    def get_master(self, master_id: int) -> dict:
+        r = requests.get(f"{BASE_URL}/masters/{master_id}",
+                          headers=self.headers, timeout=15)
+        r.raise_for_status()
+        return r.json()
+
     @staticmethod
     def extract_tracklist(release: dict) -> list:
         """Returns [{"position": "A1", "title": "..."}], skipping headers/indexes."""
@@ -168,6 +174,30 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
         bpm = notes_bpm.get((t.get("position") or "").upper())
         if bpm:
             t["discogs_notes_bpm"] = bpm
+
+    # Notes-BPM coverage varies release-to-release -- confirmed live, a
+    # release picked for one track's BPM can be missing it for another.
+    # If any track is still missing it, check the master's designated
+    # main_release (Discogs' own "canonical" pick, distinct from the
+    # community.have ranking above though they often coincide) as one
+    # extra, bounded source to fill gaps -- not every version under the
+    # master (could be dozens; not worth the extra API calls per record),
+    # just this one well-reasoned fallback.
+    if any(not t.get("discogs_notes_bpm") for t in tracklist) and release.get("master_id"):
+        try:
+            master = client.get_master(release["master_id"])
+            main_release_id = master.get("main_release")
+            if main_release_id and main_release_id != release_id:
+                main_release = client.get_release(main_release_id)
+                main_notes_bpm = _parse_notes_bpm(main_release.get("notes", ""))
+                for t in tracklist:
+                    if not t.get("discogs_notes_bpm"):
+                        bpm = main_notes_bpm.get((t.get("position") or "").upper())
+                        if bpm:
+                            t["discogs_notes_bpm"] = bpm
+        except requests.RequestException:
+            pass  # best-effort supplementary lookup -- a failure here shouldn't break the match
+
     return {
         "matched": True,
         "release_id": release_id,
