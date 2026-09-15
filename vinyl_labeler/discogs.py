@@ -10,9 +10,29 @@ much noisier (remixes, multiple pressings, reissues all share a title).
 Sign up for a free personal access token at:
 https://www.discogs.com/settings/developers
 """
+import re
+
 import requests
 
 BASE_URL = "https://api.discogs.com"
+
+
+def _titles_plausibly_match(a: str, b: str) -> bool:
+    """Loose overlap check -- normalized, share at least one significant
+    (4+ char) word. Used to sanity-check a catalog_number match against
+    what vision actually read off the label: catalog number is a near-
+    unique key *if read correctly*, but a single misread digit can land
+    on another real, valid catalog number entirely -- confirmed live,
+    UR-049 misread as UR-069 (a real but different Underground Resistance
+    release), matched with full "catalog_number" confidence despite being
+    the wrong record. If vision didn't give us a title to compare against,
+    there's nothing to sanity-check, so this doesn't second-guess."""
+    def words(s):
+        return {w for w in re.sub(r"[^a-z0-9\s]", " ", s.lower()).split() if len(w) >= 4}
+    wa, wb = words(a or ""), words(b or "")
+    if not wa or not wb:
+        return True
+    return bool(wa & wb)
 
 
 class DiscogsClient:
@@ -34,7 +54,14 @@ class DiscogsClient:
             # number read correctly off a spine photo, on its own, found
             # nothing. artist/title fallback keeps the filter since that
             # search is broader/noisier and format narrows it usefully.
-            params["catno"] = catalog_number
+            # A literal hyphen inside the query breaks Discogs' search
+            # parser -- it's treated as an exclude/minus operator rather
+            # than punctuation, so "UR-049" silently matches unrelated
+            # releases instead of the exact catalog number printed on the
+            # label. Confirmed live across two labels: replacing the
+            # hyphen with a space ("UR 049") finds the correct release;
+            # the literal hyphen does not, with no error to signal it.
+            params["catno"] = catalog_number.replace("-", " ")
         else:
             params["format"] = "Vinyl"
         if artist:
@@ -79,14 +106,27 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
     confidence = "none"
 
     if catalog_number:
-        results = client.search_release(catalog_number=catalog_number)
-        if results:
+        candidates = client.search_release(catalog_number=catalog_number)
+        # Sanity-check against vision's own release_title before trusting
+        # this as a near-unique match -- see _titles_plausibly_match.
+        if candidates and _titles_plausibly_match(release_title, candidates[0].get("title", "")):
+            results = candidates
             confidence = "catalog_number"
 
     if not results and (artist or release_title):
         results = client.search_release(artist=artist, title=release_title)
         if results:
             confidence = "artist_title"  # noisier -- multiple pressings can share this
+
+    if not results and release_title:
+        # Last resort: title alone, dropping a possibly-wrong artist guess.
+        # Common on a label with no distinct artist text printed (just a
+        # label/crew name) -- vision can mistake a track title for the
+        # artist, and an artist+title search with a wrong artist term
+        # tends to find nothing even when the title alone would.
+        results = client.search_release(title=release_title)
+        if results:
+            confidence = "artist_title"  # same noisy tier -- no artist to add confidence
 
     if not results:
         return {"matched": False, "release_id": None, "tracklist": [], "confidence": "none"}

@@ -532,6 +532,33 @@ function bpmBadge(track) {
   return 'unconfirmed';
 }
 
+function resetNewRecordForm() {
+  // Called after a real commit (print or queue -- not dry-run, which is
+  // just previewing) so the New Record tab is clean for the next physical
+  // record, rather than still showing the just-committed one until a new
+  // photo happens to overwrite it -- confusing enough that it was causing
+  // trips to the Library tab just to confirm the previous one went through.
+  record = null;
+  editingCatalogNumber = null;
+  lastPhotoFile = null;
+  reviewArea.classList.add('hidden');
+  $('fArtist').value = '';
+  $('fTitle').value = '';
+  $('fCatno').value = '';
+  $('tracksContainer').innerHTML = '';
+  $('tracklistConfidence').textContent = '';
+  $('tracklistConfidence').className = 'badge';
+  $('previewImg').classList.add('hidden');
+  $('previewImg').src = '';
+  $('photoInput').value = '';
+  $('retryIdentifyBtn').classList.add('hidden');
+  $('manualEntryForm').classList.add('hidden');
+  $('manualArtist').value = '';
+  $('manualSong').value = '';
+  $('dryRun').checked = false;
+  $('highlightsOnly').checked = false;
+}
+
 function renderReview() {
   $('fArtist').value = record.artist || '';
   $('fTitle').value = record.release_title || '';
@@ -792,9 +819,9 @@ $('printBtn').addEventListener('click', async () => {
       if (oldCatalogNumberToDelete) {
         await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(oldCatalogNumberToDelete), { method: 'DELETE' });
       }
-      editingCatalogNumber = null;  // this edit/scan session is done
       let msg = 'Added to the print queue.';
       if (assignedPlaceholder) msg += `\n\nNo catalog number was printed on this record -- assigned placeholder: ${record.catalog_number}`;
+      resetNewRecordForm();
       alert(msg);
       return;
     }
@@ -804,14 +831,14 @@ $('printBtn').addEventListener('click', async () => {
     });
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
+    let msg = dryRun ? 'Dry run saved on the server.' : `Sent to printer. (print #${data.print_count} of this catalog number)`;
+    if (assignedPlaceholder) msg += `\n\nNo catalog number was printed on this record -- assigned placeholder: ${data.catalog_number}`;
     if (!dryRun) {
       if (oldCatalogNumberToDelete) {
         await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(oldCatalogNumberToDelete), { method: 'DELETE' });
       }
-      editingCatalogNumber = null;  // this edit/scan session is done (a dry-run isn't a real commit)
+      resetNewRecordForm();
     }
-    let msg = dryRun ? 'Dry run saved on the server.' : `Sent to printer. (print #${data.print_count} of this catalog number)`;
-    if (assignedPlaceholder) msg += `\n\nNo catalog number was printed on this record -- assigned placeholder: ${data.catalog_number}`;
     alert(msg);
   } catch (err) {
     alert('Print failed: ' + err.message);
