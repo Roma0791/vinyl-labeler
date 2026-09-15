@@ -133,6 +133,8 @@
     <input type="text" id="manualArtist" placeholder="e.g. Brian Cid">
     <label>Song name</label>
     <input type="text" id="manualSong" placeholder="e.g. Pluto">
+    <label>Catalog #</label>
+    <input type="text" id="manualCatno" placeholder="e.g. CITY 1054">
     <button id="manualSearchBtn">🔎 Search Discogs</button>
   </div>
 </section>
@@ -484,12 +486,13 @@ $('manualEntryBtn').addEventListener('click', () => {
 $('manualSearchBtn').addEventListener('click', async () => {
   const artist = $('manualArtist').value.trim();
   const song = $('manualSong').value.trim();
-  if (!artist && !song) { alert('Enter at least an artist or a song name.'); return; }
+  const catno = $('manualCatno').value.trim();
+  if (!artist && !song && !catno) { alert('Enter at least an artist, a song name, or a catalog number.'); return; }
   showSpinner(true);
   reviewArea.classList.add('hidden');
   try {
     record = {
-      artist, release_title: song, catalog_number: '',
+      artist, release_title: song, catalog_number: catno,
       legibility: 'manual', notes: 'Entered manually -- white label, nothing to photograph.',
       tracks: [{ position: '', title: song, printed_bpm: null, printed_key: null, highlight: false }],
     };
@@ -504,6 +507,7 @@ $('manualSearchBtn').addEventListener('click', async () => {
     $('manualEntryForm').classList.add('hidden');
     $('manualArtist').value = '';
     $('manualSong').value = '';
+    $('manualCatno').value = '';
   } catch (err) {
     alert('Something went wrong: ' + err.message);
   } finally {
@@ -571,6 +575,7 @@ function resetNewRecordForm() {
   $('manualEntryForm').classList.add('hidden');
   $('manualArtist').value = '';
   $('manualSong').value = '';
+  $('manualCatno').value = '';
   $('dryRun').checked = false;
   $('highlightsOnly').checked = false;
 }
@@ -703,6 +708,24 @@ function renderTracks() {
   });
 }
 
+// A plain mean lets a single mistimed tap (rushed, late, half-tempo slip)
+// swing the whole displayed BPM, which is exactly what makes it feel like
+// it never settles. Filtering out intervals that are far from the median
+// before averaging means one off tap gets ignored instead of dragging the
+// number around -- the display only moves for a tap that's consistent
+// with the others. Falls back to a plain mean with too few taps to find a
+// meaningful median from.
+function robustAverage(intervals) {
+  if (intervals.length < 4) {
+    return intervals.reduce((a, b) => a + b, 0) / intervals.length;
+  }
+  const sorted = [...intervals].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const kept = intervals.filter(iv => Math.abs(iv - median) / median <= 0.25);
+  const use = kept.length >= 2 ? kept : intervals;
+  return use.reduce((a, b) => a + b, 0) / use.length;
+}
+
 function buildTapPanel(panel, trackIndex) {
   panel.innerHTML = `
     <div class="tap-bpm" id="tapBpm${trackIndex}">--</div>
@@ -717,15 +740,37 @@ function buildTapPanel(panel, trackIndex) {
   const bpmDisplay = $('tapBpm' + trackIndex);
   const tapBtn = $('tapButton' + trackIndex);
 
+  // Window of taps a BPM estimate is averaged over. Bigger than the interval
+  // count needed to lock a tempo -- with only ~8 a plain mean never really
+  // settles, each new tap keeps nudging it. 12 lets it stabilize once
+  // you're in the groove while still forgetting old taps eventually.
+  const MAX_TAPS = 12;
+  // A gap this long between taps means you paused or lost the beat, not
+  // that you tapped unusually slowly (that'd be under 30 BPM) -- averaging
+  // it in as a real interval drags the estimate around for several taps
+  // afterwards too, since it stays in the window. Starting a fresh run
+  // instead keeps one pause from corrupting everything that follows.
+  const RESET_GAP_MS = 2200;
+  // Two taps closer together than this aren't humanly possible on purpose
+  // (over 400 BPM) -- almost certainly a duplicate event slipping past the
+  // touchstart/click guard below, not a real second tap. Drop it rather
+  // than let it skew the average.
+  const MIN_INTERVAL_MS = 150;
+
   function registerTap() {
     const now = performance.now();
+    const last = taps[taps.length - 1];
+    if (last !== undefined) {
+      const gap = now - last;
+      if (gap < MIN_INTERVAL_MS) return;
+      if (gap > RESET_GAP_MS) taps = [];
+    }
     taps.push(now);
-    if (taps.length > 8) taps.shift();
+    if (taps.length > MAX_TAPS) taps.shift();
     if (taps.length >= 2) {
       const intervals = [];
       for (let k = 1; k < taps.length; k++) intervals.push(taps[k] - taps[k-1]);
-      const avg = intervals.reduce((a,b) => a+b, 0) / intervals.length;
-      bpmDisplay.textContent = Math.round(60000 / avg);
+      bpmDisplay.textContent = Math.round(60000 / robustAverage(intervals));
     }
   }
 
