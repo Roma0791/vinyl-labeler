@@ -79,9 +79,14 @@ def from_getsongbpm(api_key: str, artist: str, title: str) -> dict | None:
     Discogs data). A title-only search reliably returns matches with each
     result's artist, exactly like getsongbpm.com's own website search
     behaves -- so this searches by title, then picks the result whose
-    artist matches, falling back to the top result if none do (a same-
-    titled track by a different artist is still a better guess than
-    nothing, same spirit as Discogs' artist_title fallback tier)."""
+    artist matches (normalized). Does NOT fall back to the top result when
+    none match: confirmed live that a generic one-word title (e.g.
+    "Jaguar", "Ascension") returns entirely unrelated songs by other
+    artists with no connection to the one being searched, and silently
+    trusting the top hit there returns a confidently wrong BPM with
+    nothing to signal it's a guess -- worse than returning nothing, which
+    the UI already handles ("BPM not found -- enter manually or tap it
+    below")."""
     if not api_key or not artist or not title:
         return None
     params = {
@@ -105,8 +110,10 @@ def from_getsongbpm(api_key: str, artist: str, title: str) -> dict | None:
     target = _normalize_artist(artist)
     top = next(
         (r for r in results if _normalize_artist(r.get("artist", {}).get("name", "")) == target),
-        results[0],
+        None,
     )
+    if top is None:
+        return None
     tempo = top.get("tempo")
     if not tempo:
         return None
