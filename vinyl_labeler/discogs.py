@@ -35,6 +35,25 @@ def _titles_plausibly_match(a: str, b: str) -> bool:
     return bool(wa & wb)
 
 
+def _parse_notes_bpm(notes: str) -> dict:
+    """Extract per-position BPM from a release's free-text notes field,
+    when present -- e.g. "BPM:\\nA: 138\\nB: 139". Discogs has no
+    structured BPM field, but DJ-culture labels/community-curated entries
+    often document it in notes anyway; when they do, it's BPM for this
+    exact pressing, straight from community documentation, so it's worth
+    trusting on par with reading it off the label yourself. Returns
+    {position: bpm}, {} if the notes don't contain a recognizable block."""
+    m = re.search(r"BPM:?[ \t]*\n((?:[A-Za-z0-9]+[ \t]*:[ \t]*\d+(?:\.\d+)?[ \t]*\n?)+)", notes or "")
+    if not m:
+        return {}
+    out = {}
+    for line in m.group(1).strip().splitlines():
+        lm = re.match(r"([A-Za-z0-9]+)[ \t]*:[ \t]*(\d+(?:\.\d+)?)", line.strip())
+        if lm:
+            out[lm.group(1).upper()] = float(lm.group(2))
+    return out
+
+
 class DiscogsClient:
     def __init__(self, token: str, user_agent: str):
         self.token = token
@@ -108,8 +127,18 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
     if catalog_number:
         candidates = client.search_release(catalog_number=catalog_number)
         # Sanity-check against vision's own release_title before trusting
-        # this as a near-unique match -- see _titles_plausibly_match.
-        if candidates and _titles_plausibly_match(release_title, candidates[0].get("title", "")):
+        # any of these as a near-unique match -- see _titles_plausibly_match.
+        if release_title:
+            candidates = [c for c in candidates
+                          if _titles_plausibly_match(release_title, c.get("title", ""))]
+        if candidates:
+            # Discogs often has several near-duplicate listings for the
+            # same catalog number (different data entries, reissues,
+            # mispresses...) -- search results already carry a
+            # community.have count, so prefer the most-owned one as the
+            # best proxy for "the canonical/most complete entry" rather
+            # than whatever Discogs' search happened to rank first.
+            candidates.sort(key=lambda c: c.get("community", {}).get("have", 0), reverse=True)
             results = candidates
             confidence = "catalog_number"
 
@@ -134,6 +163,11 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
     release_id = results[0]["id"]
     release = client.get_release(release_id)
     tracklist = client.extract_tracklist(release)
+    notes_bpm = _parse_notes_bpm(release.get("notes", ""))
+    for t in tracklist:
+        bpm = notes_bpm.get((t.get("position") or "").upper())
+        if bpm:
+            t["discogs_notes_bpm"] = bpm
     return {
         "matched": True,
         "release_id": release_id,

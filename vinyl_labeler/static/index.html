@@ -527,7 +527,7 @@ function confidenceBadgeClass(conf) {
 
 function bpmBadge(track) {
   const src = track.bpm_source;
-  if (src === 'printed_on_label' || src === 'audio_analysis' || src === 'manual') return 'high';
+  if (src === 'printed_on_label' || src === 'discogs_notes' || src === 'audio_analysis' || src === 'manual') return 'high';
   if (src === 'getsongbpm') return 'medium';
   return 'unconfirmed';
 }

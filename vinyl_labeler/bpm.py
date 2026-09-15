@@ -8,7 +8,14 @@ landscape, not a bug in this tool. Tiers, best to worst:
   1. printed_on_label   -- BPM was actually printed on the pressing (from
                             the vision extraction). This is what you're
                             holding; nothing beats it when present.
-  2. getsongbpm          -- getsongbpm.com's free API. Independent of
+  2. discogs_notes       -- BPM documented in the matched release's Discogs
+                            notes field (e.g. "BPM:\nA: 138\nB: 139").
+                            Discogs has no structured BPM field, but DJ-
+                            culture labels/community-curated entries often
+                            note it anyway -- community documentation for
+                            this exact pressing, trusted on par with
+                            reading it off the label yourself.
+  3. getsongbpm          -- getsongbpm.com's free API. Independent of
                             Spotify (whose audio-features/tempo endpoint was
                             killed off in Nov 2024 with no official
                             replacement -- most "BPM finder" sites you'll
@@ -17,7 +24,7 @@ landscape, not a bug in this tool. Tiers, best to worst:
                             per their own docs they only archive songs tied
                             to an existing album, so vinyl-only white labels
                             and promos are often simply absent.
-  3. audio_analysis      -- local tempo estimate from an actual audio
+  4. audio_analysis      -- local tempo estimate from an actual audio
                             sample of the track (e.g. a 20-30s phone
                             recording off the turntable) -- optional, but
                             it's the only tier here that measures the
@@ -31,7 +38,7 @@ landscape, not a bug in this tool. Tiers, best to worst:
                             and building it needs a version-matched LLVM
                             toolchain -- too fragile for a tool that
                             should just keep working.
-  4. beatport_manual     -- not scraped (Beatport's search results aren't a
+  5. beatport_manual     -- not scraped (Beatport's search results aren't a
                             stable public API and scraping them is legally
                             grey for a redistributed tool). Instead this
                             just builds you a direct search URL to eyeball --
@@ -59,6 +66,17 @@ def from_printed_label(track: dict) -> dict | None:
     bpm = track.get("printed_bpm")
     if bpm:
         return {"bpm": bpm, "source": "printed_on_label", "confidence": "high"}
+    return None
+
+
+def from_discogs_notes(track: dict) -> dict | None:
+    """discogs.py's confirm_tracklist() attaches discogs_notes_bpm to a
+    track when the matched release's notes field documents it (see
+    discogs._parse_notes_bpm) -- this just promotes that into the same
+    {"bpm", "source", "confidence"} shape every other tier returns."""
+    bpm = track.get("discogs_notes_bpm")
+    if bpm:
+        return {"bpm": bpm, "source": "discogs_notes", "confidence": "high"}
     return None
 
 
@@ -188,6 +206,8 @@ def resolve_bpm(track: dict, artist: str, getsongbpm_key: str,
     """Runs the tiers in order, returns the first hit plus the Beatport
     check-link regardless (cheap, always useful as a second opinion)."""
     result = from_printed_label(track)
+    if result is None:
+        result = from_discogs_notes(track)
     if result is None and audio_sample_path:
         result = from_audio_sample(audio_sample_path)
     if result is None:
