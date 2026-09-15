@@ -42,7 +42,25 @@ def list_jobs(queue_path: Path) -> list:
 
 def enqueue(queue_path: Path, catalog_number: str, label_size: str, style: dict,
             highlights_only: bool) -> dict:
+    """Upsert by catalog_number, not a plain append -- at most one queued
+    job per catalog number. Editing a record via Queue -> Edit and then
+    choosing "Add to Queue" again is updating the settings for the same
+    physical label still waiting to print, not asking for a second one --
+    confirmed live: doing exactly that produced two cards for the same
+    catalog number in the Queue tab, since this always appended a fresh
+    job with no check for one already there."""
     jobs = _load(queue_path)
+    existing = next((j for j in jobs if j["catalog_number"] == catalog_number), None)
+    if existing:
+        existing.update({
+            "label_size": label_size,
+            "style": style or {},
+            "highlights_only": highlights_only,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+        })
+        _save(queue_path, jobs)
+        return existing
+
     job = {
         "id": uuid.uuid4().hex,
         "catalog_number": catalog_number,
