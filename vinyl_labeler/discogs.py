@@ -60,7 +60,8 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
                        release_title: str) -> dict:
     """
     Tries catalog number first (near-unique), falls back to artist+title.
-    Returns {"matched": bool, "release_id": int|None, "tracklist": [...],
+    Returns {"matched": bool, "release_id": int|None, "artist": str,
+              "release_title": str, "styles": [str, ...], "tracklist": [...],
               "confidence": "catalog_number"|"artist_title"|"none"}
     """
     results = []
@@ -93,7 +94,28 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
         # layouts, worn ink -- exactly where OCR-style reads fail first).
         "artist": release.get("artists_sort", ""),
         "release_title": release.get("title", ""),
+        # Discogs' style taxonomy ("Tribal", "Tech House") is far more
+        # specific and DJ-relevant than a generic per-track genre tag would
+        # be -- falls back to the broader "genres" field ("Electronic") only
+        # if the release has no styles listed at all.
+        "styles": release.get("styles") or release.get("genres") or [],
         "tracklist": tracklist,
         "confidence": confidence,
         "candidate_count": len(results),
     }
+
+
+def distribute_styles_to_tracks(tracks: list, styles: list) -> None:
+    """Assigns a per-track "genre" in place, positionally: track i gets
+    styles[i]. Discogs doesn't have a real per-track genre/style concept --
+    style is a release-level tag list -- so positional mapping is the best
+    available approximation. Releases usually list fewer styles than
+    tracks, so any track past the end of the list gets the last style
+    rather than nothing, on the assumption the release's final/overall
+    style still applies to the rest of the tracklist."""
+    if not styles:
+        for t in tracks:
+            t["genre"] = ""
+        return
+    for i, t in enumerate(tracks):
+        t["genre"] = styles[i] if i < len(styles) else styles[-1]

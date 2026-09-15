@@ -144,6 +144,17 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     artist_font = _font("bold", s["artist_font_size"])
     artist = _truncate_to_width(draw, artist, artist_font, usable_width)
 
+    # Genre, right-aligned above the release-title line: one entry per
+    # visible track (positionally mapped from Discogs' styles list -- see
+    # discogs.distribute_styles_to_tracks), joined in track order with "/"
+    # and no spaces. `tracks` here is already whatever's actually being
+    # printed (_skip_on_label filtered, and highlights_only filtered by the
+    # caller before this function ever sees the record), so a hidden
+    # track's genre is naturally excluded too.
+    genre_font = _font("regular", s["release_title_font_size"])
+    genre_text = "/".join(t["genre"] for t in tracks if t.get("genre")).upper()
+    genre_text = _truncate_to_width(draw, genre_text, genre_font, usable_width)
+
     release_title_font = _font("regular", s["release_title_font_size"])
     release_title_text = f"– {record.get('release_title', '')}".strip()
     release_title_lines = _wrap_text(draw, release_title_text, release_title_font, usable_width)
@@ -152,11 +163,13 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     catno_font = _font("regular", s["catno_font_size"])
     catno = _truncate_to_width(draw, catno, catno_font, usable_width)
 
-    header_lines = [(artist, artist_font, s["artist_font_size"])]
-    header_lines += [(line, release_title_font, s["release_title_font_size"])
+    header_lines = [(artist, artist_font, s["artist_font_size"], "left")]
+    if genre_text:
+        header_lines.append((genre_text, genre_font, s["release_title_font_size"], "right"))
+    header_lines += [(line, release_title_font, s["release_title_font_size"], "left")
                       for line in release_title_lines]
     if catno:
-        header_lines.append((catno, catno_font, s["catno_font_size"]))
+        header_lines.append((catno, catno_font, s["catno_font_size"], "left"))
 
     # ---- track rows: fixed detail/BPM sizes for every row; weight (not
     # size) is what marks a highlighted track ----
@@ -174,7 +187,7 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
 
     # ---- now that every size is known, compute total height and render ----
     header_h = MARGIN_PX
-    for _, _, size in header_lines:
+    for _, _, size, _ in header_lines:
         header_h += _line_height(size) + _gap(size)
     content_h = sum(p["row_h"] for p in row_plan)
     fixed_h = _fixed_label_height(label_size)
@@ -184,8 +197,9 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     draw = ImageDraw.Draw(img)
 
     y = MARGIN_PX
-    for text, font, size in header_lines:
-        draw.text((MARGIN_PX, y), text, font=font, fill=0)
+    for text, font, size, align in header_lines:
+        x = width - MARGIN_PX - draw.textlength(text, font=font) if align == "right" else MARGIN_PX
+        draw.text((x, y), text, font=font, fill=0)
         y += _line_height(size) + _gap(size)
 
     for p in row_plan:

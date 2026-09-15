@@ -141,6 +141,7 @@ def enrich(cfg, working_json):
             printed = printed_bpm_by_pos.get(t.get("position"))
             if printed:
                 t["printed_bpm"] = printed["printed_bpm"]
+        discogs_mod.distribute_styles_to_tracks(record["tracks"], match["styles"])
     # else: keep whatever the photo extraction gave us, confidence stays "none"
 
     for t in record.get("tracks", []):

@@ -522,6 +522,10 @@ function renderTracks() {
       </div>
       <span class="badge ${bpmBadge(t)}">${t.bpm_source || 'none'}</span>
       ${t.beatport_check_url ? `<a href="${t.beatport_check_url}" target="_blank" style="font-size:.78rem; margin-left:8px;">check on Beatport ↗</a>` : ''}
+      <div class="row2" style="margin-top:6px;">
+        <button class="secondary small halveBpmBtn" data-i="${i}" title="Halve the BPM (detected double the actual tempo)">½× halve</button>
+        <button class="secondary small doubleBpmBtn" data-i="${i}" title="Double the BPM (detected half the actual tempo)">×2 double</button>
+      </div>
       <div class="highlight-row">
         <input type="checkbox" id="highlight-${i}" ${t.highlight ? 'checked' : ''} data-f="highlight" data-i="${i}">
         <label for="highlight-${i}" style="margin:0; display:inline;">Highlight (bold on label)</label>
@@ -530,7 +534,12 @@ function renderTracks() {
         <button class="secondary small tapToggle" data-i="${i}">⏱ Tap tempo</button>
         <button class="secondary small audioSampleBtn" data-i="${i}">🎙️ Analyze audio sample</button>
       </div>
-      <input type="file" id="audioSample${i}" data-i="${i}" accept="audio/*" capture class="hidden">
+      <!-- No capture attribute: iOS Safari's audio capture support is
+      broken/incomplete and silently falls back to the video camera despite
+      accept=audio/* -- a known, longstanding platform limitation, not
+      fixable with different HTML. Plain accept=audio/* gives a normal
+      file picker instead (record in Voice Memos first, then pick it here). -->
+      <input type="file" id="audioSample${i}" data-i="${i}" accept="audio/*" class="hidden">
       <div class="tap-panel hidden" id="tapPanel${i}"></div>
     `;
     container.appendChild(div);
@@ -546,6 +555,22 @@ function renderTracks() {
       record.tracks[i][f] = val;
       if (f === 'bpm') record.tracks[i].bpm_source = 'manual';
     });
+  });
+
+  // ---- octave-error correction: any BPM detection method (tap tempo,
+  // audio analysis, GetSongBPM) can occasionally land on half or double
+  // the real tempo -- these just scale whatever's currently in the field ----
+  function scaleBpm(i, factor) {
+    if (record.tracks[i].bpm == null) return;
+    record.tracks[i].bpm = Math.round(record.tracks[i].bpm * factor * 10) / 10;
+    record.tracks[i].bpm_source = 'manual';
+    renderTracks();
+  }
+  container.querySelectorAll('.doubleBpmBtn').forEach(btn => {
+    btn.addEventListener('click', (e) => scaleBpm(+e.target.dataset.i, 2));
+  });
+  container.querySelectorAll('.halveBpmBtn').forEach(btn => {
+    btn.addEventListener('click', (e) => scaleBpm(+e.target.dataset.i, 0.5));
   });
 
   container.querySelectorAll('.tapToggle').forEach(btn => {

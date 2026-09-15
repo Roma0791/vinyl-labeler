@@ -140,6 +140,7 @@ def enrich(req: EnrichRequest):
             printed = printed_bpm_by_pos.get(t.get("position"))
             if printed:
                 t["printed_bpm"] = printed["printed_bpm"]
+        discogs_mod.distribute_styles_to_tracks(record["tracks"], match["styles"])
 
     for t in record.get("tracks", []):
         result = bpm_mod.resolve_bpm(t, record.get("artist", ""), cfg.getsongbpm_api_key)
