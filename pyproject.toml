@@ -1,0 +1,22 @@
+[project]
+name = "vinyl-labeler"
+version = "0.1.0"
+description = "Photo -> confirmed tracklist -> tiered BPM -> printed QL-570 label"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic",
+    "requests",
+    "pillow",
+    "click",
+    "pyyaml",
+    "brother_ql",
+    "pyusb",
+    "keyring",
+]
+
+[project.scripts]
+vinyl-label = "vinyl_labeler.cli:cli"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

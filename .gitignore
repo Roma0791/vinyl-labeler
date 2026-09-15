@@ -1,0 +1,19 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Personal dev context -- names the user, home network details, etc.
+# Useful locally, not for a public repo.
+CLAUDE.md
+
+# Local working files a CLI run can drop in the project directory
+record.json
+label_preview.png
+
+# Config, catalogue, and print queue live outside the repo entirely
+# (~/.vinyl_labeler/) -- nothing to ignore here, but noted for clarity.

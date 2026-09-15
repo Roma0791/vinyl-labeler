@@ -1,0 +1,32 @@
+# Copy this to ~/.vinyl_labeler/config.yaml and fill in the non-secret settings
+# below. API keys do NOT go in this file -- run these instead, which store
+# each key in the macOS Keychain (encrypted at rest, not plaintext on disk):
+#
+#   vinyl-label set-key anthropic     # console.anthropic.com -> API Keys
+#   vinyl-label set-key discogs       # discogs.com/settings/developers -> generate token
+#   vinyl-label set-key getsongbpm    # getsongbpm.com/api -> sign up
+#
+# Check what's configured (without printing the values) with:
+#   vinyl-label key-status
+#
+# An env var (ANTHROPIC_API_KEY, DISCOGS_TOKEN, GETSONGBPM_API_KEY) overrides
+# the Keychain if set -- handy for a one-off shell, not needed day to day.
+
+vision_model: "claude-haiku-4-5"       # cheaper/faster default -- the web UI has a per-photo
+                                        # Haiku/Sonnet switch for retrying a specific label
+
+anthropic_workspace_id: ""             # only needed if your Anthropic key "works across
+                                        # workspaces" (not scoped to one workspace) -- Console
+                                        # -> Settings -> Workspaces -> ID column. Leave blank
+                                        # for a single-workspace-scoped key.
+
+discogs_user_agent: "VinylLabeler/0.1 (personal cataloguing tool)"
+
+catalogue_path: "~/.vinyl_labeler/catalogue.json"
+
+printer:
+  model: "QL-570"
+  backend: "pyusb"                     # correct backend for a USB-connected Mac
+  identifier: ""                       # e.g. "usb://0x04f9:0x2028" -- run
+                                        # `vinyl-label discover-printer` to find yours
+  label_size: "62"                     # 62mm continuous tape (see config.py for why)

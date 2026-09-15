@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Vinyl Labeler</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 16px 16px 80px;
+    background: #f4f4f5; color: #111;
+    max-width: 640px; margin-inline: auto;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 16px; }
+  h2 { font-size: 1rem; margin: 24px 0 8px; color: #555; }
+  section { background: #fff; border-radius: 12px; padding: 14px; margin-bottom: 14px;
+             box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  label { display: block; font-size: .78rem; color: #666; margin-bottom: 2px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 10px; font-size: 1rem; border: 1px solid #ccc;
+    border-radius: 8px; margin-bottom: 10px; background: #fff; color: #111;
+  }
+  button {
+    font-size: 1rem; padding: 12px 16px; border: none; border-radius: 10px;
+    background: #2563eb; color: #fff; cursor: pointer; width: 100%; margin-top: 6px;
+  }
+  button.secondary { background: #e5e7eb; color: #111; }
+  button.small { width: auto; padding: 8px 12px; font-size: .85rem; }
+  button.danger { background: #dc2626; }
+  #photoInput { display: none; }
+  .photo-btn { display: block; text-align: center; padding: 18px; border: 2px dashed #999;
+               border-radius: 12px; color: #555; }
+  .track { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+  .track-row { display: flex; gap: 8px; align-items: center; }
+  .track-row input[type=text] { flex: 1; margin-bottom: 0; }
+  .track-row input[type=number] { width: 90px; margin-bottom: 0; }
+  .badge { display: inline-block; font-size: .72rem; padding: 2px 8px; border-radius: 999px;
+           margin: 4px 0; }
+  .badge.high { background: #dcfce7; color: #166534; }
+  .badge.medium { background: #fef9c3; color: #854d0e; }
+  .badge.unconfirmed { background: #fee2e2; color: #991b1b; }
+  .warn { background: #fee2e2; color: #991b1b; padding: 8px; border-radius: 8px;
+          font-size: .85rem; margin: 6px 0; }
+  .tap-panel { background: #f9fafb; border-radius: 8px; padding: 10px; margin-top: 8px; }
+  .tap-btn { background: #16a34a; font-size: 1.4rem; padding: 22px; }
+  .tap-bpm { font-size: 1.6rem; text-align: center; margin: 8px 0; font-weight: bold; }
+  .highlight-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: .85rem; }
+  .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  #previewImg { width: 100%; border: 1px solid #ddd; border-radius: 8px; margin-top: 8px;
+                background: #fff repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
+  .spinner { text-align: center; padding: 24px; color: #666; }
+  .hidden { display: none; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
+                    display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal-overlay.hidden { display: none; }
+  a { color: #2563eb; }
+  .row2 { display: flex; gap: 8px; }
+  .row2 > * { flex: 1; }
+  .check-row { display: flex; align-items: center; gap: 10px; }
+  .check-row.align-end { justify-content: flex-end; text-align: right; }
+  .check-row label { display: inline; margin: 0; font-size: .85rem; color: #111; }
+  input[type=checkbox] {
+    appearance: none; -webkit-appearance: none;
+    width: 28px; height: 28px; flex-shrink: 0;
+    border: 1px solid #ccc; border-radius: 8px; background: #fff;
+    cursor: pointer; position: relative;
+  }
+  input[type=checkbox]:checked { background: #2563eb; border-color: #2563eb; }
+  input[type=checkbox]:checked::after {
+    content: ""; position: absolute; left: 10px; top: 5px;
+    width: 6px; height: 12px; border: solid #fff; border-width: 0 3px 3px 0;
+    transform: rotate(45deg);
+  }
+  .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tabs button { background: #e5e7eb; color: #111; }
+  .tabs button.active { background: #2563eb; color: #fff; }
+  .lib-card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px;
+              margin-top: 10px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .lib-card:active { background: #f4f4f5; }
+  .lib-card .lib-title { font-weight: 600; font-size: 1rem; }
+  .lib-card .lib-sub { color: #666; font-size: .82rem; margin-top: 2px; }
+  .lib-card .lib-meta { display: flex; justify-content: space-between; color: #999;
+                         font-size: .75rem; margin-top: 8px; }
+  #librarySearch { margin-bottom: 10px; }
+  .model-switch { display: flex; align-items: center; justify-content: center; gap: 10px;
+                   margin: 12px 0 4px; font-size: .82rem; }
+  .model-switch .side { color: #999; transition: color .15s; }
+  .model-switch .side.active { color: #111; font-weight: 600; }
+  .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; }
+  .switch input[type=checkbox] { opacity: 0; width: 0; height: 0; border: none; }
+  .switch .slider { position: absolute; inset: 0; background: #ccc; border-radius: 999px;
+                     cursor: pointer; transition: background .15s; }
+  .switch .slider::before { content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px;
+                             background: #fff; border-radius: 50%; transition: transform .15s;
+                             box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .switch input:checked + .slider { background: #2563eb; }
+  .switch input:checked + .slider::before { transform: translateX(20px); }
+</style>
+</head>
+<body>
+
+<h1>🎧 Vinyl Labeler</h1>
+
+<div class="tabs">
+  <button id="tabNewBtn" class="active">📷 New Record</button>
+  <button id="tabLibraryBtn">📚 Library</button>
+  <button id="tabQueueBtn">🖨️ Queue</button>
+</div>
+
+<div id="newRecordTab">
+<section id="captureSection">
+  <label class="photo-btn" for="photoInput">📷 Take photo of label / cover</label>
+  <input type="file" id="photoInput" accept="image/*" capture="environment">
+  <div class="model-switch">
+    <span class="side active" id="modelLabelHaiku">Haiku</span>
+    <label class="switch">
+      <input type="checkbox" id="visionModelToggle">
+      <span class="slider"></span>
+    </label>
+    <span class="side" id="modelLabelSonnet">Sonnet</span>
+  </div>
+  <button class="secondary small hidden" id="retryIdentifyBtn" style="width:100%;">🔁 Retry photo with selected model</button>
+
+  <button class="secondary small" id="manualEntryBtn" style="width:100%; margin-top:10px;">✏️ White label -- enter manually</button>
+  <div id="manualEntryForm" class="hidden" style="margin-top:10px;">
+    <label>Artist</label>
+    <input type="text" id="manualArtist" placeholder="e.g. Brian Cid">
+    <label>Song name</label>
+    <input type="text" id="manualSong" placeholder="e.g. Pluto">
+    <button id="manualSearchBtn">🔎 Search Discogs</button>
+  </div>
+</section>
+
+<div id="spinner" class="spinner hidden">Working…</div>
+
+<div id="reviewArea" class="hidden">
+
+  <section>
+    <h2>Release</h2>
+    <label>Artist</label>
+    <input type="text" id="fArtist">
+    <label>Title</label>
+    <input type="text" id="fTitle">
+    <label>Catalog #</label>
+    <input type="text" id="fCatno">
+    <div id="tracklistConfidence" class="badge"></div>
+    <button class="secondary small" id="reRunLookup">Re-run Discogs / BPM lookup</button>
+  </section>
+
+  <section>
+    <h2>Tracks</h2>
+    <div id="tracksContainer"></div>
+  </section>
+
+  <section>
+    <h2>Label</h2>
+    <label>Label / tape type</label>
+    <select id="labelSize"></select>
+
+    <button class="secondary" id="previewBtn">Preview label</button>
+    <img id="previewImg" class="hidden">
+  </section>
+
+  <section>
+    <div class="row2">
+      <div class="check-row"><input type="checkbox" id="dryRun"> <label for="dryRun">Dry run (don't actually print)</label></div>
+      <div class="check-row align-end"><label for="highlightsOnly">Highlighted tracks only</label> <input type="checkbox" id="highlightsOnly"></div>
+    </div>
+    <button id="printBtn">🖨️ Print</button>
+  </section>
+
+</div><!-- /reviewArea -->
+</div><!-- /newRecordTab -->
+
+<div id="libraryTab" class="hidden">
+  <section>
+    <input type="text" id="librarySearch" placeholder="Search artist, title, catalog #…">
+    <div id="libraryRows"></div>
+  </section>
+</div><!-- /libraryTab -->
+
+<div id="queueTab" class="hidden">
+  <section>
+    <div id="queueEmptyNote" class="hidden" style="color:#999;">Nothing queued.</div>
+    <button id="printAllQueueBtn" class="hidden">🖨️ Print all queued labels</button>
+    <div id="queueRows"></div>
+  </section>
+</div><!-- /queueTab -->
+
+<div id="printChoiceModal" class="modal-overlay hidden">
+  <div style="background:#fff; border-radius:12px; padding:20px; max-width:340px; width:100%;">
+    <div style="font-weight:600; margin-bottom:14px;">Print this label now, or add it to the queue for later (e.g. printer out of tape)?</div>
+    <button id="printChoicePrint">🖨️ Print Now</button>
+    <button class="secondary" id="printChoiceQueue" style="margin-top:8px;">📥 Add to Queue</button>
+    <button class="secondary" id="printChoiceCancel" style="margin-top:8px; background:transparent; color:#666;">Cancel</button>
+  </div>
+</div>
+
+<script>
+let record = null;
+
+const $ = (id) => document.getElementById(id);
+const spinner = $('spinner');
+const reviewArea = $('reviewArea');
+
+function showSpinner(on) {
+  spinner.classList.toggle('hidden', !on);
+}
+
+// ---- tabs ----
+let libraryData = [];
+
+function switchTab(tab) {
+  $('newRecordTab').classList.toggle('hidden', tab !== 'new');
+  $('libraryTab').classList.toggle('hidden', tab !== 'library');
+  $('queueTab').classList.toggle('hidden', tab !== 'queue');
+  $('tabNewBtn').classList.toggle('active', tab === 'new');
+  $('tabLibraryBtn').classList.toggle('active', tab === 'library');
+  $('tabQueueBtn').classList.toggle('active', tab === 'queue');
+  if (tab === 'library') loadLibrary();
+  if (tab === 'queue') loadQueue();
+}
+$('tabNewBtn').addEventListener('click', () => switchTab('new'));
+$('tabLibraryBtn').addEventListener('click', () => switchTab('library'));
+$('tabQueueBtn').addEventListener('click', () => switchTab('queue'));
+
+async function loadLibrary() {
+  const resp = await fetch('/catalogue');
+  libraryData = await resp.json();
+  renderLibraryRows(libraryData);
+}
+
+function renderLibraryRows(rows) {
+  const container = $('libraryRows');
+  container.innerHTML = '';
+  if (rows.length === 0) {
+    container.innerHTML = '<div style="color:#999; padding:10px 0;">No records printed yet.</div>';
+    return;
+  }
+  rows.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'lib-card';
+    const when = r.last_processed_at ? new Date(r.last_processed_at).toLocaleDateString() : '—';
+    card.innerHTML = `
+      <div class="lib-title">${r.artist || '(unknown artist)'} – ${r.release_title || '(untitled)'}</div>
+      <div class="lib-sub">${r.catalog_number || ''} · ${r.track_count} track${r.track_count === 1 ? '' : 's'}</div>
+      <div class="lib-meta"><span>Last printed ${when}</span><span>Printed ${r.print_count}×</span></div>
+    `;
+    card.addEventListener('click', () => loadRecordForEdit(r.catalog_number));
+    container.appendChild(card);
+  });
+}
+
+$('librarySearch').addEventListener('input', (e) => {
+  const q = e.target.value.toLowerCase();
+  const filtered = libraryData.filter(r =>
+    (r.artist || '').toLowerCase().includes(q) ||
+    (r.release_title || '').toLowerCase().includes(q) ||
+    (r.catalog_number || '').toLowerCase().includes(q)
+  );
+  renderLibraryRows(filtered);
+});
+
+// ---- print queue: deferred prints (e.g. printer out of tape) ----
+async function loadQueue() {
+  const resp = await fetch('/queue');
+  const jobs = await resp.json();
+  renderQueueRows(jobs);
+}
+
+function renderQueueRows(jobs) {
+  const container = $('queueRows');
+  container.innerHTML = '';
+  $('queueEmptyNote').classList.toggle('hidden', jobs.length !== 0);
+  $('printAllQueueBtn').classList.toggle('hidden', jobs.length === 0);
+  jobs.forEach(job => {
+    const r = job.record || {};
+    const card = document.createElement('div');
+    card.className = 'lib-card';
+    card.style.cursor = 'default';
+    const queuedAt = job.queued_at ? new Date(job.queued_at).toLocaleString() : '';
+    card.innerHTML = `
+      <div class="lib-title">${r.artist || '(unknown artist)'} – ${r.release_title || '(untitled)'}</div>
+      <div class="lib-sub">${r.catalog_number || ''} · queued ${queuedAt}</div>
+      <div class="row2" style="margin-top:8px;">
+        <button class="small printQueueBtn" data-id="${job.id}">🖨️ Print</button>
+        <button class="small danger removeQueueBtn" data-id="${job.id}">✕ Remove</button>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+  container.querySelectorAll('.printQueueBtn').forEach(btn => {
+    btn.addEventListener('click', () => printQueueJob(btn.dataset.id));
+  });
+  container.querySelectorAll('.removeQueueBtn').forEach(btn => {
+    btn.addEventListener('click', () => removeQueueJob(btn.dataset.id));
+  });
+}
+
+async function printQueueJob(jobId) {
+  showSpinner(true);
+  try {
+    const resp = await fetch(`/queue/${jobId}/print`, { method: 'POST' });
+    if (!resp.ok) throw new Error(await resp.text());
+    await loadQueue();
+  } catch (err) {
+    alert('Print failed: ' + err.message);
+  } finally {
+    showSpinner(false);
+  }
+}
+
+async function removeQueueJob(jobId) {
+  if (!confirm('Remove this from the queue without printing it?')) return;
+  await fetch(`/queue/${jobId}`, { method: 'DELETE' });
+  loadQueue();
+}
+
+$('printAllQueueBtn').addEventListener('click', async () => {
+  if (!confirm('Print every label currently in the queue?')) return;
+  showSpinner(true);
+  try {
+    const resp = await fetch('/queue/print-all', { method: 'POST' });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    const ok = data.results.filter(r => r.ok).length;
+    const failed = data.results.find(r => !r.ok);
+    let msg = `Printed ${ok} of ${data.results.length}.`;
+    if (failed) msg += `\n\nStopped after a failure: ${failed.error}\nRemaining jobs are still queued.`;
+    alert(msg);
+  } catch (err) {
+    alert('Print all failed: ' + err.message);
+  } finally {
+    showSpinner(false);
+    loadQueue();
+  }
+});
+
+async function loadRecordForEdit(catalogNumber) {
+  showSpinner(true);
+  try {
+    const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(catalogNumber));
+    if (!resp.ok) throw new Error(await resp.text());
+    record = await resp.json();
+    (record.tracks || []).forEach(t => { if (t.highlight === undefined) t.highlight = false; });
+    renderReview();
+    switchTab('new');
+  } catch (err) {
+    alert('Could not load that record: ' + err.message);
+  } finally {
+    showSpinner(false);
+  }
+}
+
+// ---- label size dropdown ----
+fetch('/label-sizes').then(r => r.json()).then(sizes => {
+  const sel = $('labelSize');
+  sizes.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.code;
+    opt.textContent = `${s.name} (${s.kind === 'ENDLESS' ? 'continuous roll' : 'pre-cut'})`;
+    if (s.code === '62') opt.selected = true;
+    sel.appendChild(opt);
+  });
+});
+
+// ---- photo capture -> identify -> enrich ----
+let lastPhotoFile = null;
+
+function currentVisionModel() {
+  return $('visionModelToggle').checked ? 'claude-sonnet-5' : 'claude-haiku-4-5';
+}
+
+$('visionModelToggle').addEventListener('change', () => {
+  const sonnet = $('visionModelToggle').checked;
+  $('modelLabelHaiku').classList.toggle('active', !sonnet);
+  $('modelLabelSonnet').classList.toggle('active', sonnet);
+});
+
+async function runIdentify(file) {
+  showSpinner(true);
+  reviewArea.classList.add('hidden');
+  try {
+    const fd = new FormData();
+    fd.append('photo', file);
+    fd.append('model', currentVisionModel());
+    const idResp = await fetch('/identify', { method: 'POST', body: fd });
+    if (!idResp.ok) throw new Error(await idResp.text());
+    record = await idResp.json();
+
+    const enrichResp = await fetch('/enrich', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ record })
+    });
+    if (!enrichResp.ok) throw new Error(await enrichResp.text());
+    record = await enrichResp.json();
+
+    renderReview();
+    $('retryIdentifyBtn').classList.remove('hidden');
+  } catch (err) {
+    alert('Something went wrong: ' + err.message);
+  } finally {
+    showSpinner(false);
+  }
+}
+
+$('photoInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  lastPhotoFile = file;
+  runIdentify(file);
+});
+
+$('retryIdentifyBtn').addEventListener('click', () => {
+  if (!lastPhotoFile) return;
+  runIdentify(lastPhotoFile);
+});
+
+// ---- manual entry: white label, nothing to photograph -- skip straight to
+// Discogs search with a typed artist + song name instead of a vision pass ----
+$('manualEntryBtn').addEventListener('click', () => {
+  $('manualEntryForm').classList.toggle('hidden');
+});
+
+$('manualSearchBtn').addEventListener('click', async () => {
+  const artist = $('manualArtist').value.trim();
+  const song = $('manualSong').value.trim();
+  if (!artist && !song) { alert('Enter at least an artist or a song name.'); return; }
+  showSpinner(true);
+  reviewArea.classList.add('hidden');
+  try {
+    record = {
+      artist, release_title: song, catalog_number: '',
+      legibility: 'manual', notes: 'Entered manually -- white label, nothing to photograph.',
+      tracks: [{ position: '', title: song, printed_bpm: null, printed_key: null, highlight: false }],
+    };
+    const enrichResp = await fetch('/enrich', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ record }),
+    });
+    if (!enrichResp.ok) throw new Error(await enrichResp.text());
+    record = await enrichResp.json();
+    (record.tracks || []).forEach(t => { if (t.highlight === undefined) t.highlight = false; });
+    renderReview();
+    $('manualEntryForm').classList.add('hidden');
+    $('manualArtist').value = '';
+    $('manualSong').value = '';
+  } catch (err) {
+    alert('Something went wrong: ' + err.message);
+  } finally {
+    showSpinner(false);
+  }
+});
+
+// ---- re-run lookup after manual edits (e.g. fixed catalog number) ----
+$('reRunLookup').addEventListener('click', async () => {
+  syncFormIntoRecord();
+  showSpinner(true);
+  try {
+    const resp = await fetch('/enrich', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ record })
+    });
+    record = await resp.json();
+    renderReview();
+  } catch (err) {
+    alert('Lookup failed: ' + err.message);
+  } finally {
+    showSpinner(false);
+  }
+});
+
+function syncFormIntoRecord() {
+  record.artist = $('fArtist').value;
+  record.release_title = $('fTitle').value;
+  record.catalog_number = $('fCatno').value;
+}
+
+function confidenceBadgeClass(conf) {
+  if (conf === 'catalog_number') return 'high';
+  if (conf === 'artist_title') return 'medium';
+  return 'unconfirmed';
+}
+
+function bpmBadge(track) {
+  const src = track.bpm_source;
+  if (src === 'printed_on_label' || src === 'audio_analysis' || src === 'manual') return 'high';
+  if (src === 'getsongbpm') return 'medium';
+  return 'unconfirmed';
+}
+
+function renderReview() {
+  $('fArtist').value = record.artist || '';
+  $('fTitle').value = record.release_title || '';
+  $('fCatno').value = record.catalog_number || '';
+
+  const confEl = $('tracklistConfidence');
+  const conf = record.tracklist_confidence || 'none';
+  confEl.textContent = 'Tracklist match: ' + conf;
+  confEl.className = 'badge ' + confidenceBadgeClass(conf);
+
+  renderTracks();
+  reviewArea.classList.remove('hidden');
+}
+
+function renderTracks() {
+  const container = $('tracksContainer');
+  container.innerHTML = '';
+  (record.tracks || []).forEach((t, i) => {
+    const div = document.createElement('div');
+    div.className = 'track';
+
+    const needsAttention = t.bpm === null || t.bpm === undefined || t.bpm_source === 'none';
+    div.innerHTML = `
+      ${needsAttention ? '<div class="warn">⚠ BPM not found -- enter manually or tap it below</div>' : ''}
+      <div class="track-row">
+        <input type="text" value="${t.position || ''}" style="max-width:60px" data-f="position" data-i="${i}">
+        <input type="text" value="${(t.title || '').replace(/"/g,'&quot;')}" data-f="title" data-i="${i}">
+        <input type="number" step="0.1" value="${t.bpm ?? ''}" placeholder="bpm" data-f="bpm" data-i="${i}">
+      </div>
+      <span class="badge ${bpmBadge(t)}">${t.bpm_source || 'none'}</span>
+      ${t.beatport_check_url ? `<a href="${t.beatport_check_url}" target="_blank" style="font-size:.78rem; margin-left:8px;">check on Beatport ↗</a>` : ''}
+      <div class="highlight-row">
+        <input type="checkbox" id="highlight-${i}" ${t.highlight ? 'checked' : ''} data-f="highlight" data-i="${i}">
+        <label for="highlight-${i}" style="margin:0; display:inline;">Highlight (bold on label)</label>
+      </div>
+      <div class="row2">
+        <button class="secondary small tapToggle" data-i="${i}">⏱ Tap tempo</button>
+        <button class="secondary small audioSampleBtn" data-i="${i}">🎙️ Analyze audio sample</button>
+      </div>
+      <input type="file" id="audioSample${i}" data-i="${i}" accept="audio/*" capture class="hidden">
+      <div class="tap-panel hidden" id="tapPanel${i}"></div>
+    `;
+    container.appendChild(div);
+  });
+
+  container.querySelectorAll('input[data-f]').forEach(inp => {
+    inp.addEventListener('change', (e) => {
+      const i = +e.target.dataset.i;
+      const f = e.target.dataset.f;
+      let val = e.target.value;
+      if (f === 'bpm') val = val === '' ? null : parseFloat(val);
+      if (f === 'highlight') val = e.target.checked;
+      record.tracks[i][f] = val;
+      if (f === 'bpm') record.tracks[i].bpm_source = 'manual';
+    });
+  });
+
+  container.querySelectorAll('.tapToggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const i = +e.target.dataset.i;
+      const panel = $('tapPanel' + i);
+      const isHidden = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden');
+      if (isHidden) buildTapPanel(panel, i);
+    });
+  });
+
+  // ---- audio_analysis BPM tier: record/pick a short sample, estimate
+  // tempo server-side via ffmpeg + autocorrelation ----
+  container.querySelectorAll('.audioSampleBtn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      $('audioSample' + e.target.dataset.i).click();
+    });
+  });
+
+  container.querySelectorAll('input[type=file][id^=audioSample]').forEach(inp => {
+    inp.addEventListener('change', async (e) => {
+      const i = +e.target.dataset.i;
+      const file = e.target.files[0];
+      if (!file) return;
+      showSpinner(true);
+      try {
+        const fd = new FormData();
+        fd.append('audio', file);
+        const resp = await fetch('/analyze-audio', { method: 'POST', body: fd });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        if (data.bpm == null) {
+          alert('Could not detect a tempo from that recording -- try a longer or clearer sample (20-30s, close to the speaker/turntable).');
+          return;
+        }
+        record.tracks[i].bpm = data.bpm;
+        record.tracks[i].bpm_source = 'audio_analysis';
+        renderTracks();
+      } catch (err) {
+        alert('Audio analysis failed: ' + err.message);
+      } finally {
+        showSpinner(false);
+        e.target.value = '';
+      }
+    });
+  });
+}
+
+function buildTapPanel(panel, trackIndex) {
+  panel.innerHTML = `
+    <div class="tap-bpm" id="tapBpm${trackIndex}">--</div>
+    <button class="tap-btn" id="tapButton${trackIndex}">TAP</button>
+    <div class="row2" style="margin-top:8px;">
+      <button class="secondary small" id="tapReset${trackIndex}">Reset</button>
+      <button class="small" id="tapUse${trackIndex}">Use this BPM</button>
+    </div>
+  `;
+  let taps = [];
+  let usingTouch = false;
+  const bpmDisplay = $('tapBpm' + trackIndex);
+  const tapBtn = $('tapButton' + trackIndex);
+
+  function registerTap() {
+    const now = performance.now();
+    taps.push(now);
+    if (taps.length > 8) taps.shift();
+    if (taps.length >= 2) {
+      const intervals = [];
+      for (let k = 1; k < taps.length; k++) intervals.push(taps[k] - taps[k-1]);
+      const avg = intervals.reduce((a,b) => a+b, 0) / intervals.length;
+      bpmDisplay.textContent = Math.round(60000 / avg);
+    }
+  }
+
+  // touchstart fires the instant a finger lands, well before the 'click'
+  // event (which waits for touchend plus dispatch overhead) -- that gap is
+  // exactly the lag/jitter a tap-tempo tool can't afford. preventDefault
+  // here also suppresses the follow-up synthetic click for this tap so it
+  // doesn't get double-counted.
+  tapBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    usingTouch = true;
+    registerTap();
+  }, { passive: false });
+  tapBtn.addEventListener('click', () => {
+    if (usingTouch) return;  // already handled by touchstart above
+    registerTap();
+  });
+  $('tapReset' + trackIndex).addEventListener('click', () => {
+    taps = [];
+    bpmDisplay.textContent = '--';
+  });
+  $('tapUse' + trackIndex).addEventListener('click', () => {
+    const val = bpmDisplay.textContent;
+    if (val === '--') { alert('Tap at least twice first.'); return; }
+    record.tracks[trackIndex].bpm = parseFloat(val);
+    record.tracks[trackIndex].bpm_source = 'manual';
+    renderTracks();
+  });
+}
+
+$('previewBtn').addEventListener('click', async () => {
+  syncFormIntoRecord();
+  const resp = await fetch('/render', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ record, label_size: $('labelSize').value, highlights_only: $('highlightsOnly').checked })
+  });
+  const data = await resp.json();
+  const img = $('previewImg');
+  img.src = 'data:image/png;base64,' + data.png_base64;
+  img.classList.remove('hidden');
+});
+
+// Deterministic placeholder for a record with no real catalog number
+// (promo/white-label) -- slugged from artist+title so scanning the same
+// record again later lands on this same catalogue entry instead of a
+// fresh duplicate. Mirrors store.placeholder_catalog_number() in Python.
+function placeholderCatalogNumber(artist, releaseTitle) {
+  const slug = `${artist} ${releaseTitle}`.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return slug ? `NOCAT-${slug}` : `NOCAT-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+}
+
+// Resolves to 'print' | 'queue' | 'cancel'.
+function askPrintChoice() {
+  return new Promise((resolve) => {
+    const modal = $('printChoiceModal');
+    modal.classList.remove('hidden');
+    const cleanup = (result) => { modal.classList.add('hidden'); resolve(result); };
+    $('printChoicePrint').onclick = () => cleanup('print');
+    $('printChoiceQueue').onclick = () => cleanup('queue');
+    $('printChoiceCancel').onclick = () => cleanup('cancel');
+  });
+}
+
+$('printBtn').addEventListener('click', async () => {
+  syncFormIntoRecord();
+  const dryRun = $('dryRun').checked;
+  // Catalog number is mandatory for a real print (or a queued one -- it'll
+  // become a real print eventually) -- it's the catalogue's key, and
+  // without it a reprint later means redoing the identify/Discogs/BPM
+  // pipeline from scratch instead of just reprinting. Dry runs are exempt
+  // since nothing gets saved either way.
+  let assignedPlaceholder = false;
+  if (!dryRun && !record.catalog_number) {
+    record.catalog_number = placeholderCatalogNumber(record.artist, record.release_title);
+    $('fCatno').value = record.catalog_number;
+    assignedPlaceholder = true;
+  }
+
+  let choice = 'print';
+  if (!dryRun) {
+    choice = await askPrintChoice();
+    if (choice === 'cancel') return;
+  }
+
+  showSpinner(true);
+  try {
+    if (choice === 'queue') {
+      const resp = await fetch('/queue', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ record, label_size: $('labelSize').value, highlights_only: $('highlightsOnly').checked })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      let msg = 'Added to the print queue.';
+      if (assignedPlaceholder) msg += `\n\nNo catalog number was printed on this record -- assigned placeholder: ${record.catalog_number}`;
+      alert(msg);
+      return;
+    }
+    const resp = await fetch('/print', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ record, label_size: $('labelSize').value, dry_run: dryRun, highlights_only: $('highlightsOnly').checked })
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    let msg = dryRun ? 'Dry run saved on the server.' : `Sent to printer. (print #${data.print_count} of this catalog number)`;
+    if (assignedPlaceholder) msg += `\n\nNo catalog number was printed on this record -- assigned placeholder: ${data.catalog_number}`;
+    alert(msg);
+  } catch (err) {
+    alert('Print failed: ' + err.message);
+  } finally {
+    showSpinner(false);
+  }
+});
+</script>
+</body>
+</html>

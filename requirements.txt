@@ -1,0 +1,18 @@
+anthropic
+requests
+pillow
+click
+pyyaml
+brother_ql
+pyusb
+fastapi
+uvicorn
+python-multipart
+keyring          # stores API keys in macOS Keychain instead of plaintext config
+numpy            # audio_analysis BPM tier: autocorrelation tempo estimate
+
+# audio_analysis also needs the `ffmpeg` binary on PATH (brew install ffmpeg)
+# to decode whatever format a phone recording comes in as -- not a pip
+# package. Deliberately not using librosa/numba here: that combination has
+# no prebuilt wheel for Intel Mac + current Python, and building it needs a
+# version-matched LLVM toolchain.
