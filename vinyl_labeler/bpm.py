@@ -47,7 +47,11 @@ import urllib.parse
 import numpy as np
 import requests
 
-GETSONGBPM_BASE = "https://api.getsongbpm.com"
+# getsongbpm.com moved their API to this domain on 2024-09-25 (per their own
+# changelog at getsongbpm.com/api). The old api.getsongbpm.com domain's
+# "automatic redirect" either no longer works or routes through Cloudflare's
+# bot-challenge -- confirmed by testing directly, don't revert this.
+GETSONGBPM_BASE = "https://api.getsong.co"
 
 
 def from_printed_label(track: dict) -> dict | None:
@@ -58,13 +62,10 @@ def from_printed_label(track: dict) -> dict | None:
 
 
 def from_getsongbpm(api_key: str, artist: str, title: str) -> dict | None:
-    """
-    NOTE: field names below follow getsongbpm.com's published API pattern
-    (lookup=song:X artist:Y). Their exact response shape isn't verifiable
-    from this sandbox (the domain isn't reachable here) -- confirm against
-    https://getsongbpm.com/api once you have a key, and adjust the
-    response-parsing lines below if the JSON keys differ.
-    """
+    """Verified live against api.getsong.co with a real key: a match
+    returns {"search": [{...}]}, a miss returns {"search": {"error": "no
+    result"}} -- a dict, not an empty list, which is why the type check
+    below matters."""
     if not api_key or not artist or not title:
         return None
     params = {
@@ -79,8 +80,10 @@ def from_getsongbpm(api_key: str, artist: str, title: str) -> dict | None:
     except (requests.RequestException, ValueError):
         return None
 
-    results = data.get("search") or []
-    if not results:
+    # On no match the API returns {"search": {"error": "no result"}} -- a
+    # dict, not an empty list -- so check the type before indexing.
+    results = data.get("search")
+    if not isinstance(results, list) or not results:
         return None
     top = results[0]
     tempo = top.get("tempo")
