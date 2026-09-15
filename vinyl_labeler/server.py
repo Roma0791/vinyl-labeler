@@ -125,11 +125,15 @@ def enrich(req: EnrichRequest):
     record["discogs_matched"] = match["matched"]
 
     if match["matched"]:
-        # Discogs' own artist/title, once matched, is worth trusting over a
-        # vision read that may have caught the catalog number but missed the
-        # artist/title text (small print, multi-artist-per-side layouts).
+        # Discogs' own artist/title/catno, once matched, are worth trusting
+        # over a vision read that may have misread a digit in the catalog
+        # number (causing the catno-tier search to correctly find nothing
+        # and fall back to this noisier artist_title match) or missed the
+        # artist/title text entirely (small print, multi-artist-per-side
+        # layouts).
         record["artist"] = match["artist"] or record.get("artist")
         record["release_title"] = match["release_title"] or record.get("release_title")
+        record["catalog_number"] = match["catalog_number"] or record.get("catalog_number")
 
         printed_bpm_by_pos = {
             t.get("position"): t for t in record.get("tracks", []) if t.get("printed_bpm")

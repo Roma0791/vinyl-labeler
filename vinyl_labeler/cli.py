@@ -126,13 +126,16 @@ def enrich(cfg, working_json):
     record["tracklist_confidence"] = match["confidence"]
 
     if match["matched"]:
-        # Discogs' own artist/title/tracklist are the source of truth once
-        # matched -- a vision read can catch the catalog number printed
-        # clearly but miss the artist/title text (small print, multi-artist
-        # -per-side layouts, worn ink). Carry over any printed_bpm we
-        # already read off the photo by position.
+        # Discogs' own artist/title/catno/tracklist are the source of truth
+        # once matched -- a vision read can misread a digit in the catalog
+        # number (causing the catno-tier search to correctly find nothing
+        # and fall back to this noisier artist_title match) or miss the
+        # artist/title text (small print, multi-artist-per-side layouts,
+        # worn ink). Carry over any printed_bpm we already read off the
+        # photo by position.
         record["artist"] = match["artist"] or record.get("artist")
         record["release_title"] = match["release_title"] or record.get("release_title")
+        record["catalog_number"] = match["catalog_number"] or record.get("catalog_number")
         printed_bpm_by_pos = {
             t.get("position"): t for t in record.get("tracks", []) if t.get("printed_bpm")
         }

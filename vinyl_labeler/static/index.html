@@ -200,6 +200,12 @@
 
 <script>
 let record = null;
+// Set while editing an existing catalogue entry (Library/Queue -> Edit).
+// Re-scanning a photo or re-running manual search while editing would
+// otherwise silently start a brand new identity -- vision has no idea
+// this was supposed to update an existing entry -- producing a stray
+// duplicate catalogue row instead of updating the one being edited.
+let editingCatalogNumber = null;
 
 const $ = (id) => document.getElementById(id);
 const spinner = $('spinner');
@@ -222,7 +228,10 @@ function switchTab(tab) {
   if (tab === 'library') loadLibrary();
   if (tab === 'queue') loadQueue();
 }
-$('tabNewBtn').addEventListener('click', () => switchTab('new'));
+$('tabNewBtn').addEventListener('click', () => {
+  editingCatalogNumber = null;  // deliberately starting a fresh record, not editing
+  switchTab('new');
+});
 $('tabLibraryBtn').addEventListener('click', () => switchTab('library'));
 $('tabQueueBtn').addEventListener('click', () => switchTab('queue'));
 
@@ -248,10 +257,24 @@ function renderLibraryRows(rows) {
       <div class="lib-title">${r.artist || '(unknown artist)'} – ${r.release_title || '(untitled)'}</div>
       <div class="lib-sub">${r.catalog_number || ''} · ${r.track_count} track${r.track_count === 1 ? '' : 's'}</div>
       <div class="lib-meta"><span>Last printed ${when}</span><span>${printedText}</span></div>
+      <button class="small danger deleteLibraryBtn" data-catno="${r.catalog_number}" style="margin-top:8px;">🗑 Delete</button>
     `;
     card.addEventListener('click', () => loadRecordForEdit(r.catalog_number));
     container.appendChild(card);
   });
+  container.querySelectorAll('.deleteLibraryBtn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();  // don't also trigger the card's edit-on-click
+      deleteLibraryRecord(btn.dataset.catno);
+    });
+  });
+}
+
+async function deleteLibraryRecord(catalogNumber) {
+  if (!confirm(`Delete catalog #${catalogNumber} from the library? This can't be undone.`)) return;
+  const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(catalogNumber), { method: 'DELETE' });
+  if (!resp.ok) { alert('Delete failed: ' + await resp.text()); return; }
+  loadLibrary();
 }
 
 $('librarySearch').addEventListener('input', (e) => {
@@ -361,6 +384,7 @@ async function loadRecordForEdit(catalogNumber) {
     const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(catalogNumber));
     if (!resp.ok) throw new Error(await resp.text());
     record = await resp.json();
+    editingCatalogNumber = catalogNumber;
     (record.tracks || []).forEach(t => { if (t.highlight === undefined) t.highlight = false; });
     renderReview();
     switchTab('new');
@@ -737,6 +761,20 @@ $('printBtn').addEventListener('click', async () => {
     assignedPlaceholder = true;
   }
 
+  // If editing an existing entry and the catalog number has since changed
+  // (a corrected typo via Re-run Discogs lookup, a fresh photo that found
+  // a different/better reading, or a manual retype) -- ask whether to
+  // clean up the old entry so it doesn't sit around as a duplicate of the
+  // same record. Checked here, at the actual commit point, rather than
+  // trying to lock the catalog number in place during editing -- that
+  // would also block legitimate corrections.
+  let oldCatalogNumberToDelete = null;
+  if (!dryRun && editingCatalogNumber && editingCatalogNumber !== record.catalog_number) {
+    if (confirm(`This record's catalog number changed from ${editingCatalogNumber} to ${record.catalog_number} while editing.\n\nDelete the old entry (${editingCatalogNumber}) so it doesn't stay behind as a duplicate?`)) {
+      oldCatalogNumberToDelete = editingCatalogNumber;
+    }
+  }
+
   let choice = 'print';
   if (!dryRun) {
     choice = await askPrintChoice();
@@ -751,6 +789,10 @@ $('printBtn').addEventListener('click', async () => {
         body: JSON.stringify({ record, label_size: $('labelSize').value, highlights_only: $('highlightsOnly').checked })
       });
       if (!resp.ok) throw new Error(await resp.text());
+      if (oldCatalogNumberToDelete) {
+        await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(oldCatalogNumberToDelete), { method: 'DELETE' });
+      }
+      editingCatalogNumber = null;  // this edit/scan session is done
       let msg = 'Added to the print queue.';
       if (assignedPlaceholder) msg += `\n\nNo catalog number was printed on this record -- assigned placeholder: ${record.catalog_number}`;
       alert(msg);
@@ -762,6 +804,12 @@ $('printBtn').addEventListener('click', async () => {
     });
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
+    if (!dryRun) {
+      if (oldCatalogNumberToDelete) {
+        await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(oldCatalogNumberToDelete), { method: 'DELETE' });
+      }
+      editingCatalogNumber = null;  // this edit/scan session is done (a dry-run isn't a real commit)
+    }
     let msg = dryRun ? 'Dry run saved on the server.' : `Sent to printer. (print #${data.print_count} of this catalog number)`;
     if (assignedPlaceholder) msg += `\n\nNo catalog number was printed on this record -- assigned placeholder: ${data.catalog_number}`;
     alert(msg);

@@ -24,9 +24,19 @@ class DiscogsClient:
 
     def search_release(self, catalog_number: str = None, artist: str = None,
                         title: str = None) -> list:
-        params = {"type": "release", "format": "Vinyl"}
+        params = {"type": "release"}
         if catalog_number:
+            # catno is already a near-unique key -- don't also constrain by
+            # format. A real release with a format tagged inconsistently on
+            # Discogs' side (or a catalog number shared with a non-vinyl
+            # pressing) would otherwise come back as a false "not found"
+            # despite definitely existing -- reported live: a catalog
+            # number read correctly off a spine photo, on its own, found
+            # nothing. artist/title fallback keeps the filter since that
+            # search is broader/noisier and format narrows it usefully.
             params["catno"] = catalog_number
+        else:
+            params["format"] = "Vinyl"
         if artist:
             params["artist"] = artist
         if title:
@@ -61,7 +71,8 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
     """
     Tries catalog number first (near-unique), falls back to artist+title.
     Returns {"matched": bool, "release_id": int|None, "artist": str,
-              "release_title": str, "styles": [str, ...], "tracklist": [...],
+              "release_title": str, "catalog_number": str,
+              "styles": [str, ...], "tracklist": [...],
               "confidence": "catalog_number"|"artist_title"|"none"}
     """
     results = []
@@ -87,13 +98,18 @@ def confirm_tracklist(client: DiscogsClient, catalog_number: str, artist: str,
         "matched": True,
         "release_id": release_id,
         "release_url": release.get("uri", ""),
-        # Discogs' own artist/title once matched -- a confirmed catalog_number
-        # match is a near-unique key, so this is worth trusting over a vision
-        # read that may have caught the catalog number printed clearly but
-        # missed the artist/title (small print, multi-artist-per-side
-        # layouts, worn ink -- exactly where OCR-style reads fail first).
+        # Discogs' own artist/title/catno once matched -- worth trusting
+        # over a vision read that may have caught the catalog number
+        # printed clearly but misread a digit (small print, worn ink,
+        # barcode-adjacent text -- exactly where OCR-style reads slip),
+        # missed the artist/title, or both. Confirmed live: a spine photo's
+        # catalog number was off by one digit, catno search correctly found
+        # nothing, artist_title fallback found the right release -- but the
+        # original wrong catno was kept in the saved record instead of
+        # being corrected here, exactly the gap this fixes.
         "artist": release.get("artists_sort", ""),
         "release_title": release.get("title", ""),
+        "catalog_number": results[0].get("catno", ""),
         # Discogs' style taxonomy ("Tribal", "Tech House") is far more
         # specific and DJ-relevant than a generic per-track genre tag would
         # be -- falls back to the broader "genres" field ("Electronic") only
