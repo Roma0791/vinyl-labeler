@@ -95,6 +95,40 @@ def discover_printer(cfg):
         click.echo(f)
 
 
+def _set_auto_power_off(cfg, minutes: int, label: str):
+    if not cfg.printer_identifier:
+        raise click.ClickException(
+            "No printer_identifier set in config.yaml. Run `vinyl-label discover-printer` first."
+        )
+    try:
+        printer_mod.set_auto_power_off(minutes, cfg.printer_identifier, backend=cfg.printer_backend)
+    except Exception as e:
+        raise click.ClickException(
+            f"{e}\nMake sure the printer is on and connected -- this can't wake it "
+            "from Auto Power-Off, only prevent it (that's the whole point)."
+        )
+    click.echo(f"Auto Power-Off {label}.")
+
+
+@cli.command(name="auto-poweroff-disable")
+@click.pass_obj
+def auto_poweroff_disable(cfg):
+    """Disable the QL-570's Auto Power-Off so it never needs USB-waking in
+    the first place -- once it fires, the printer drops off USB entirely
+    and nothing sent over the wire can bring it back, only the physical
+    button. One-time setting, stored on the printer itself."""
+    _set_auto_power_off(cfg, 0, "disabled -- the printer will stay on indefinitely")
+
+
+@cli.command(name="auto-poweroff-enable")
+@click.option("--minutes", type=click.Choice(["10", "20", "30", "40", "50", "60"]),
+              default="10", show_default=True, help="Idle timeout before the printer powers off.")
+@click.pass_obj
+def auto_poweroff_enable(cfg, minutes):
+    """Re-enable Auto Power-Off (the reverse of auto-poweroff-disable)."""
+    _set_auto_power_off(cfg, int(minutes), f"re-enabled -- powers off after {minutes} idle minutes")
+
+
 @cli.command()
 @click.argument("photo", type=click.Path(exists=True))
 @click.option("--out", type=click.Path(), default="record.json",
