@@ -46,7 +46,15 @@
   .tap-panel { background: #f9fafb; border-radius: 8px; padding: 10px; margin-top: 8px; }
   .tap-btn { background: #16a34a; font-size: 1.4rem; padding: 22px; }
   .tap-bpm { font-size: 1.6rem; text-align: center; margin: 8px 0; font-weight: bold; }
-  .highlight-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: .85rem; }
+  .highlight-row { display: flex; align-items: center; justify-content: space-between; gap: 6px;
+                    margin-bottom: 8px; font-size: .85rem; }
+  .star-rating { display: flex; gap: 1px; touch-action: none; -webkit-user-select: none;
+                  user-select: none; -webkit-touch-callout: none; }
+  .star { position: relative; width: 22px; height: 22px; font-size: 22px; line-height: 22px;
+           flex-shrink: 0; }
+  .star-outline { position: absolute; inset: 0; color: #d1d5db; }
+  .star-fill-wrap { position: absolute; inset: 0; overflow: hidden; width: 0%; }
+  .star-fill-glyph { display: block; width: 22px; color: #f59e0b; }
   .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   #previewImg { width: 100%; border: 1px solid #ddd; border-radius: 8px; margin-top: 8px;
                 background: #fff repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 16px 16px; }
@@ -592,6 +600,29 @@ function computeDisplayTitles(tracks, releaseTitle) {
   });
 }
 
+// Star rating (0-5 in 0.5 steps): each star is two stacked glyphs, an
+// always-visible gray outline and a colored fill clipped to 0/50/100% via
+// its wrapper's width -- keeps the glyph itself a fixed size so it's
+// cropped rather than squished, giving a clean half-star.
+function starFillPercent(rating, starIndex) {
+  const diff = (rating || 0) - (starIndex - 1);
+  if (diff >= 1) return 100;
+  if (diff >= 0.5) return 50;
+  return 0;
+}
+
+function renderStarWidget(container, rating) {
+  container.querySelectorAll('.star').forEach((starEl, idx) => {
+    starEl.querySelector('.star-fill-wrap').style.width = starFillPercent(rating, idx + 1) + '%';
+  });
+}
+
+function setTrackRating(i, rating) {
+  record.tracks[i].rating = rating;
+  const container = $('starRating' + i);
+  if (container) renderStarWidget(container, rating);
+}
+
 function resetNewRecordForm() {
   // Called after a real commit (print or queue -- not dry-run, which is
   // just previewing) so the New Record tab is clean for the next physical
@@ -683,8 +714,20 @@ function renderTracks() {
     div.dataset.i = i;
     div.innerHTML = `
       <div class="highlight-row">
-        <input type="checkbox" id="highlight-${i}" ${t.highlight ? 'checked' : ''} data-f="highlight" data-i="${i}">
-        <label for="highlight-${i}" style="margin:0; display:inline;">Highlight (bold on label)</label>
+        <div class="check-row" style="gap:6px;">
+          <input type="checkbox" id="highlight-${i}" ${t.highlight ? 'checked' : ''} data-f="highlight" data-i="${i}">
+          <label for="highlight-${i}" style="margin:0; display:inline;">Highlight (bold)</label>
+        </div>
+        <div class="star-rating" id="starRating${i}" data-i="${i}">
+          ${[1, 2, 3, 4, 5].map(k => `
+            <span class="star">
+              <span class="star-outline">★</span>
+              <span class="star-fill-wrap" style="width:${starFillPercent(t.rating || 0, k)}%">
+                <span class="star-fill-glyph">★</span>
+              </span>
+            </span>
+          `).join('')}
+        </div>
       </div>
       <div class="track-row">
         <input type="text" value="${t.position || ''}" style="max-width:60px" data-f="position" data-i="${i}">
@@ -745,6 +788,40 @@ function renderTracks() {
       const shortened = computeDisplayTitles(record.tracks, record.release_title || '');
       e.target.value = shortened[i];
     });
+  });
+
+  // ---- star rating: tap or slide across the row, Pointer Events unify
+  // mouse (desktop) and touch (phone). Pointer capture keeps 'pointermove'
+  // firing even if the finger drifts outside the row during a drag, and
+  // the fraction across the row's own width is clamped to [0,1] so
+  // sliding past either edge just pins the rating at 0 or 5 rather than
+  // losing the gesture. Deliberately updates via setTrackRating (an
+  // in-place DOM tweak) rather than calling renderTracks() on every move
+  // -- a full re-render would replace this very element mid-drag and
+  // drop pointer capture, killing the gesture partway through. ----
+  container.querySelectorAll('.star-rating').forEach(el => {
+    const i = +el.dataset.i;
+    let dragging = false;
+    const applyFromX = (clientX) => {
+      const rect = el.getBoundingClientRect();
+      const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+      setTrackRating(i, Math.round(frac * 5 * 2) / 2);
+    };
+    el.addEventListener('pointerdown', (e) => {
+      dragging = true;
+      // Capture is what lets the drag continue smoothly once the finger
+      // drifts outside the row -- best-effort only, so a plain tap still
+      // registers a rating even on a browser/input where capture isn't
+      // granted for some reason.
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* non-fatal */ }
+      applyFromX(e.clientX);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (dragging) applyFromX(e.clientX);
+    });
+    const stopDrag = () => { dragging = false; };
+    el.addEventListener('pointerup', stopDrag);
+    el.addEventListener('pointercancel', stopDrag);
   });
 
   // ---- octave-error correction: any BPM detection method (tap tempo,
