@@ -19,6 +19,7 @@ neutral proportions. It ships as a single variable-weight file, so weight
 is chosen via a font variation axis instead of loading separate
 regular/bold files.
 """
+import math
 import re
 from pathlib import Path
 
@@ -45,6 +46,8 @@ DEFAULT_STYLE = {
     "detail_font_size": 48,         # "A1  Baby Wants To Ride" ~= 65% width, bold
     "bpm_font_size": 77,            # 1.6x the detail size
     "highlight_bold": True,         # highlighted tracks' title (and BPM) render bold
+    "rating_star_diameter": 26,     # printed star rating icon size
+    "rating_star_gap": 6,           # spacing between the 5 star icons
 }
 
 
@@ -165,6 +168,54 @@ def highlights_only(tracks: list) -> list:
     return [t for t in tracks if t.get("highlight")]
 
 
+def _star_points(cx: float, cy: float, outer_r: float, inner_r: float) -> list:
+    """10 vertices alternating outer/inner radius, starting at the top and
+    going clockwise -- the standard construction for a 5-point star."""
+    pts = []
+    for i in range(10):
+        angle = math.radians(-90 + i * 36)
+        r = outer_r if i % 2 == 0 else inner_r
+        pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
+    return pts
+
+
+def _star_fill_fraction(rating: float, star_index: int) -> float:
+    """star_index is 1-5. Mirrors the web UI's starFillPercent exactly, so
+    a track's rating prints the same outline/half/full pattern shown on
+    the review screen."""
+    diff = (rating or 0) - (star_index - 1)
+    if diff >= 1:
+        return 1.0
+    if diff >= 0.5:
+        return 0.5
+    return 0.0
+
+
+def _draw_star(img: Image.Image, draw: ImageDraw.ImageDraw, cx: float, cy: float,
+               diameter: float, fill_fraction: float) -> None:
+    """One star centered at (cx, cy): outline always drawn (so an empty
+    star is still visible as a shape, not blank space), then filled black
+    from the left up to fill_fraction of its width (0, 0.5 or 1.0). The
+    fill is pasted through a mask rather than drawn directly, so filling
+    the left half can never overwrite the outline already drawn on the
+    right half of a half-filled star."""
+    outer_r = diameter / 2
+    inner_r = outer_r * 0.45
+    draw.polygon(_star_points(cx, cy, outer_r, inner_r), outline=0)
+    if fill_fraction <= 0:
+        return
+
+    box = int(diameter) + 2
+    mask = Image.new("L", (box, box), 0)
+    mdraw = ImageDraw.Draw(mask)
+    mdraw.polygon(_star_points(box / 2, box / 2, outer_r, inner_r), fill=255)
+    if fill_fraction < 1.0:
+        mdraw.rectangle([box * fill_fraction, 0, box, box], fill=0)
+
+    black = Image.new("1", (box, box), color=0)
+    img.paste(black, (int(cx - box / 2), int(cy - box / 2)), mask=mask)
+
+
 def render_label(record: dict, label_size: str, style: dict = None) -> Image.Image:
     """
     record shape:
@@ -249,14 +300,21 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         bpm_font = _font(kind, s["bpm_font_size"])
         row_h = max(_line_height(s["detail_font_size"]), _line_height(s["bpm_font_size"])) \
             + _gap(s["bpm_font_size"])
+        # Only unrated tracks skip the star row entirely -- most tracks on
+        # a given EP won't have one set, and 5 empty outline stars under
+        # every single track would just be ink/space spent on "no signal"
+        # rather than the occasional favorite a rating is actually for.
+        rating = t.get("rating") or 0
+        star_row_h = int(s["rating_star_diameter"] * 1.4) if rating else 0
         row_plan.append({"track": t, "display_title": display_title, "detail_font": detail_font,
-                          "bpm_font": bpm_font, "row_h": row_h})
+                          "bpm_font": bpm_font, "row_h": row_h, "rating": rating,
+                          "star_row_h": star_row_h})
 
     # ---- now that every size is known, compute total height and render ----
     header_h = MARGIN_PX
     for _, _, size, _ in header_lines:
         header_h += _line_height(size) + _gap(size)
-    content_h = sum(p["row_h"] for p in row_plan)
+    content_h = sum(p["row_h"] + p["star_row_h"] for p in row_plan)
     fixed_h = _fixed_label_height(label_size)
     height = fixed_h if fixed_h else header_h + content_h + MARGIN_PX
 
@@ -293,5 +351,14 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         draw.text((MARGIN_PX, max(y, detail_y)), line, font=p["detail_font"], fill=0)
         draw.text((width - MARGIN_PX - bpm_w, max(y, bpm_y)), bpm_str, font=p["bpm_font"], fill=0)
         y += p["row_h"]
+
+        if p["rating"]:
+            d = s["rating_star_diameter"]
+            cx = MARGIN_PX + d / 2
+            cy = y + p["star_row_h"] / 2
+            for k in range(1, 6):
+                _draw_star(img, draw, cx, cy, d, _star_fill_fraction(p["rating"], k))
+                cx += d + s["rating_star_gap"]
+            y += p["star_row_h"]
 
     return img
