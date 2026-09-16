@@ -30,6 +30,9 @@ MARGIN_PX = 16
 LINE_HEIGHT_FACTOR = 1.3   # rough ascender-to-descender multiplier for Oswald
 GAP_FACTOR = 0.22          # inter-line gap, as a fraction of the taller line's height
 
+PRINT_DPI = 300  # matches the module docstring -- brother_ql always renders at this resolution
+STAR_GAP_BELOW_TITLE_PX = round(1 * PRINT_DPI / 25.4)  # ~1mm, per request
+
 FONT_CANDIDATES = [
     str(Path.home() / "Library" / "Fonts" / "Oswald[wght].ttf"),  # macOS, brew cask font-oswald
     "/usr/share/fonts/oswald/Oswald-VariableFont_wght.ttf",        # Linux, common package layout
@@ -304,8 +307,17 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         # track (preferred over skipping the row) keeps every track's
         # layout consistent rather than only the rated ones getting a
         # rating row.
+        #
+        # Upper bound for this row's total height, used only to size the
+        # canvas ahead of the real draw pass below (which positions the
+        # stars precisely, off the title's actual measured bottom). Title
+        # and bpm are both vertically centered within a band of height
+        # (row_h - gap), so neither's real bottom -- descenders included
+        # -- can exceed y + row_h; adding the star gap/diameter/trailing-
+        # gap on top of that is generous but safe (never underestimates,
+        # which is what would actually risk clipping).
         rating = t.get("rating") or 0
-        star_row_h = int(s["rating_star_diameter"] * 1.4)
+        star_row_h = STAR_GAP_BELOW_TITLE_PX + s["rating_star_diameter"] + _gap(s["bpm_font_size"])
         row_plan.append({"track": t, "display_title": display_title, "detail_font": detail_font,
                           "bpm_font": bpm_font, "row_h": row_h, "rating": rating,
                           "star_row_h": star_row_h})
@@ -344,20 +356,33 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         detail_max_w = usable_width - bpm_w - _gap(s["detail_font_size"])
         line = _truncate_to_width(draw, f"{pos}  {title}".strip(), p["detail_font"], detail_max_w)
 
-        row_h = p["row_h"] - _gap(s["bpm_font_size"])
-        detail_y = y + (row_h - draw.textbbox((0, 0), line, font=p["detail_font"])[3]) // 2
-        bpm_y = y + (row_h - draw.textbbox((0, 0), bpm_str, font=p["bpm_font"])[3]) // 2
+        centering_h = p["row_h"] - _gap(s["bpm_font_size"])
+        detail_y = y + (centering_h - draw.textbbox((0, 0), line, font=p["detail_font"])[3]) // 2
+        bpm_y = y + (centering_h - draw.textbbox((0, 0), bpm_str, font=p["bpm_font"])[3]) // 2
+        detail_y = max(y, detail_y)
+        bpm_y = max(y, bpm_y)
 
-        draw.text((MARGIN_PX, max(y, detail_y)), line, font=p["detail_font"], fill=0)
-        draw.text((width - MARGIN_PX - bpm_w, max(y, bpm_y)), bpm_str, font=p["bpm_font"], fill=0)
-        y += p["row_h"]
+        draw.text((MARGIN_PX, detail_y), line, font=p["detail_font"], fill=0)
+        draw.text((width - MARGIN_PX - bpm_w, bpm_y), bpm_str, font=p["bpm_font"], fill=0)
 
+        # Stars anchor to the *actual* rendered bottom of the title text
+        # (via textbbox on the real drawn string), not a generic line-
+        # height estimate -- that's what makes the ~1mm gap correct even
+        # when the title happens to have a descender (y, g, j, p, q):
+        # the gap is measured from real ink, so it can never end up
+        # tighter than intended just because a particular title's tallest
+        # descender wasn't accounted for.
+        title_bottom = draw.textbbox((MARGIN_PX, detail_y), line, font=p["detail_font"])[3]
+        star_top = title_bottom + STAR_GAP_BELOW_TITLE_PX
         d = s["rating_star_diameter"]
         cx = MARGIN_PX + d / 2
-        cy = y + p["star_row_h"] / 2
+        cy = star_top + d / 2
         for k in range(1, 6):
             _draw_star(img, draw, cx, cy, d, _star_fill_fraction(p["rating"], k))
             cx += d + s["rating_star_gap"]
-        y += p["star_row_h"]
+        star_bottom = star_top + d
+
+        bpm_bottom = draw.textbbox((width - MARGIN_PX - bpm_w, bpm_y), bpm_str, font=p["bpm_font"])[3]
+        y = max(star_bottom, bpm_bottom) + _gap(s["bpm_font_size"])
 
     return img
