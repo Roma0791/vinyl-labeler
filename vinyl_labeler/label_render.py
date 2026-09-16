@@ -39,8 +39,8 @@ FONT_VARIATION = {"regular": b"Regular", "bold": b"Bold"}
 # Fixed point sizes, calibrated once against the mock EP (see module docstring).
 DEFAULT_STYLE = {
     "artist_font_size": 79,         # "Frankie Knuckles" ~= 80% of a 62mm label's width, bold
-    "release_title_font_size": 43,  # "– Baby Wants To Ride EP" -- 0.55x the artist size
-    "genre_font_size": 39,          # release_title_font_size - 4 -- it kept running out of room
+    "release_title_font_size": 45,  # "– Baby Wants To Ride EP" -- bumped +2pt for readability
+    "genre_font_size": 39,          # it kept running out of room at the full release_title size
     "catno_font_size": 17,          # 0.22x the artist size
     "detail_font_size": 48,         # "A1  Baby Wants To Ride" ~= 65% width, bold
     "bpm_font_size": 77,            # 1.6x the detail size
