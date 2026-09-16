@@ -300,12 +300,12 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         bpm_font = _font(kind, s["bpm_font_size"])
         row_h = max(_line_height(s["detail_font_size"]), _line_height(s["bpm_font_size"])) \
             + _gap(s["bpm_font_size"])
-        # Only unrated tracks skip the star row entirely -- most tracks on
-        # a given EP won't have one set, and 5 empty outline stars under
-        # every single track would just be ink/space spent on "no signal"
-        # rather than the occasional favorite a rating is actually for.
+        # Always printed, even at zero -- 5 outline stars for an unrated
+        # track (preferred over skipping the row) keeps every track's
+        # layout consistent rather than only the rated ones getting a
+        # rating row.
         rating = t.get("rating") or 0
-        star_row_h = int(s["rating_star_diameter"] * 1.4) if rating else 0
+        star_row_h = int(s["rating_star_diameter"] * 1.4)
         row_plan.append({"track": t, "display_title": display_title, "detail_font": detail_font,
                           "bpm_font": bpm_font, "row_h": row_h, "rating": rating,
                           "star_row_h": star_row_h})
@@ -352,13 +352,12 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         draw.text((width - MARGIN_PX - bpm_w, max(y, bpm_y)), bpm_str, font=p["bpm_font"], fill=0)
         y += p["row_h"]
 
-        if p["rating"]:
-            d = s["rating_star_diameter"]
-            cx = MARGIN_PX + d / 2
-            cy = y + p["star_row_h"] / 2
-            for k in range(1, 6):
-                _draw_star(img, draw, cx, cy, d, _star_fill_fraction(p["rating"], k))
-                cx += d + s["rating_star_gap"]
-            y += p["star_row_h"]
+        d = s["rating_star_diameter"]
+        cx = MARGIN_PX + d / 2
+        cy = y + p["star_row_h"] / 2
+        for k in range(1, 6):
+            _draw_star(img, draw, cx, cy, d, _star_fill_fraction(p["rating"], k))
+            cx += d + s["rating_star_gap"]
+        y += p["star_row_h"]
 
     return img
