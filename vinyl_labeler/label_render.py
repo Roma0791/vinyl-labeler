@@ -42,7 +42,8 @@ FONT_VARIATION = {"regular": b"Regular", "bold": b"Bold"}
 
 # Fixed point sizes, calibrated once against the mock EP (see module docstring).
 DEFAULT_STYLE = {
-    "artist_font_size": 79,         # "Frankie Knuckles" ~= 80% of a 62mm label's width, bold
+    "artist_font_size": 77,         # "Frankie Knuckles" ~= 80% of a 62mm label's width, bold
+                                     # (was 79pt -- trimmed 2pt on request)
     "release_title_font_size": 45,  # "– Baby Wants To Ride EP" -- bumped +2pt for readability
     "genre_font_size": 39,          # it kept running out of room at the full release_title size
     "catno_font_size": 17,          # 0.22x the artist size
@@ -51,6 +52,7 @@ DEFAULT_STYLE = {
     "highlight_bold": True,         # highlighted tracks' title (and BPM) render bold
     "rating_star_diameter": 26,     # printed star rating icon size
     "rating_star_gap": 6,           # spacing between the 5 star icons
+    "note_font_size": 45,           # detail_font_size - 3pt -- optional note at the label's bottom
 }
 
 
@@ -224,8 +226,9 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     record shape:
     {
       "artist": str, "release_title": str, "catalog_number": str,
+      "print_note": str|None,  # optional, printed at the bottom (<=2 lines) if present
       "tracks": [{"position": str, "title": str, "bpm": float|None,
-                   "bpm_source": str, "highlight": bool}]
+                   "bpm_source": str, "highlight": bool, "rating": float|None}]
     }
     Unconfirmed BPM (source in [None, "none"]) prints with a trailing "?" so
     a guess never quietly reads as a fact once it's on paper.
@@ -322,11 +325,30 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
                           "bpm_font": bpm_font, "row_h": row_h, "rating": rating,
                           "star_row_h": star_row_h})
 
+    # ---- optional note, printed at the very bottom if present -- up to 2
+    # lines, word-wrapped and widow-avoided the same way the artist name
+    # is (just smaller and left-aligned), truncated with an ellipsis if
+    # the 2nd line still doesn't fit everything. Skipped entirely when
+    # blank, unlike the always-on star row -- a note is release-level and
+    # usually absent, so there's no "empty state" worth reserving room
+    # for. ----
+    note_text = (record.get("print_note") or "").strip()
+    note_lines = []
+    note_font = None
+    if note_text:
+        note_font = _font("regular", s["note_font_size"])
+        note_lines = _wrap_text(draw, note_text, note_font, usable_width)
+        if len(note_lines) > 2:
+            note_lines = [note_lines[0], " ".join(note_lines[1:])]
+        if len(note_lines) == 2:
+            note_lines[1] = _truncate_to_width(draw, note_lines[1], note_font, usable_width)
+
     # ---- now that every size is known, compute total height and render ----
     header_h = MARGIN_PX
     for _, _, size, _ in header_lines:
         header_h += _line_height(size) + _gap(size)
-    content_h = sum(p["row_h"] + p["star_row_h"] for p in row_plan)
+    note_h = len(note_lines) * (_line_height(s["note_font_size"]) + _gap(s["note_font_size"]))
+    content_h = sum(p["row_h"] + p["star_row_h"] for p in row_plan) + note_h
     fixed_h = _fixed_label_height(label_size)
     height = fixed_h if fixed_h else header_h + content_h + MARGIN_PX
 
@@ -384,5 +406,9 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
 
         bpm_bottom = draw.textbbox((width - MARGIN_PX - bpm_w, bpm_y), bpm_str, font=p["bpm_font"])[3]
         y = max(star_bottom, bpm_bottom) + _gap(s["bpm_font_size"])
+
+    for line in note_lines:
+        draw.text((MARGIN_PX, y), line, font=note_font, fill=0)
+        y += _line_height(s["note_font_size"]) + _gap(s["note_font_size"])
 
     return img
