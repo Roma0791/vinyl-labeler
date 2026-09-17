@@ -220,6 +220,15 @@ let record = null;
 // this was supposed to update an existing entry -- producing a stray
 // duplicate catalogue row instead of updating the one being edited.
 let editingCatalogNumber = null;
+// Set only when the record being edited was opened via Queue -> Edit
+// (null for Library -> Edit or a fresh record). If the user then hits
+// Print Now (bypassing the queue's own Print button, which removes the
+// job itself via /queue/{id}/print), this job would otherwise sit behind
+// in the queue forever even though it's already been printed -- printBtn
+// removes it directly by this id after a successful real print. Keyed by
+// job id rather than catalog_number so it still finds the right job even
+// if the catalog number changed during editing.
+let editingQueueJobId = null;
 // Index of the track whose BPM controls (source badge, octave buttons, tap
 // tempo, audio sample, Beatport link) are currently expanded, or null if
 // none are -- they're collapsed by default per track to keep the tracklist
@@ -250,6 +259,7 @@ function switchTab(tab) {
 }
 $('tabNewBtn').addEventListener('click', () => {
   editingCatalogNumber = null;  // deliberately starting a fresh record, not editing
+  editingQueueJobId = null;
   switchTab('new');
 });
 $('tabLibraryBtn').addEventListener('click', () => switchTab('library'));
@@ -342,7 +352,7 @@ function renderQueueRows(jobs) {
       <div class="lib-sub">${r.catalog_number || ''} · queued ${queuedAt}</div>
       <div class="row2" style="margin-top:8px;">
         <button class="small printQueueBtn" data-id="${job.id}">🖨️ Print</button>
-        <button class="small secondary editQueueBtn" data-catno="${r.catalog_number}">✏️ Edit</button>
+        <button class="small secondary editQueueBtn" data-catno="${r.catalog_number}" data-job-id="${job.id}">✏️ Edit</button>
       </div>
       <button class="small danger removeQueueBtn" data-id="${job.id}" style="margin-top:6px;">✕ Remove</button>
     `;
@@ -352,7 +362,7 @@ function renderQueueRows(jobs) {
     btn.addEventListener('click', () => printQueueJob(btn.dataset.id));
   });
   container.querySelectorAll('.editQueueBtn').forEach(btn => {
-    btn.addEventListener('click', () => loadRecordForEdit(btn.dataset.catno));
+    btn.addEventListener('click', () => loadRecordForEdit(btn.dataset.catno, btn.dataset.jobId));
   });
   container.querySelectorAll('.removeQueueBtn').forEach(btn => {
     btn.addEventListener('click', () => removeQueueJob(btn.dataset.id));
@@ -398,13 +408,14 @@ $('printAllQueueBtn').addEventListener('click', async () => {
   }
 });
 
-async function loadRecordForEdit(catalogNumber) {
+async function loadRecordForEdit(catalogNumber, queueJobId) {
   showSpinner(true);
   try {
     const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(catalogNumber));
     if (!resp.ok) throw new Error(await resp.text());
     record = await resp.json();
     editingCatalogNumber = catalogNumber;
+    editingQueueJobId = queueJobId || null;
     (record.tracks || []).forEach(t => { if (t.highlight === undefined) t.highlight = false; });
     renderReview();
     switchTab('new');
@@ -631,6 +642,7 @@ function resetNewRecordForm() {
   // trips to the Library tab just to confirm the previous one went through.
   record = null;
   editingCatalogNumber = null;
+  editingQueueJobId = null;
   expandedBpmTrack = null;
   lastPhotoFile = null;
   reviewArea.classList.add('hidden');
@@ -1035,6 +1047,15 @@ $('printBtn').addEventListener('click', async () => {
   // same record. Checked here, at the actual commit point, rather than
   // trying to lock the catalog number in place during editing -- that
   // would also block legitimate corrections.
+  // If this record was opened via Queue -> Edit and is now being printed
+  // directly (Print Now, not the queue's own Print button), the job it
+  // came from would otherwise sit behind in the queue forever -- this
+  // path never touches print_queue.json, unlike /queue/{id}/print which
+  // removes the job itself on success. Captured now, before
+  // resetNewRecordForm() clears editingQueueJobId, so it's still known
+  // once the print actually succeeds below.
+  const queueJobIdToRemove = editingQueueJobId;
+
   let oldCatalogNumberToDelete = null;
   if (!dryRun && editingCatalogNumber && editingCatalogNumber !== record.catalog_number) {
     if (confirm(`This record's catalog number changed from ${editingCatalogNumber} to ${record.catalog_number} while editing.\n\nDelete the old entry (${editingCatalogNumber}) so it doesn't stay behind as a duplicate?`)) {
@@ -1076,6 +1097,9 @@ $('printBtn').addEventListener('click', async () => {
     if (!dryRun) {
       if (oldCatalogNumberToDelete) {
         await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(oldCatalogNumberToDelete), { method: 'DELETE' });
+      }
+      if (queueJobIdToRemove) {
+        await fetch(`/queue/${queueJobIdToRemove}`, { method: 'DELETE' });
       }
       resetNewRecordForm();
     }
