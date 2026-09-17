@@ -46,13 +46,13 @@ DEFAULT_STYLE = {
                                      # (was 79pt -- trimmed 2pt on request)
     "release_title_font_size": 45,  # "– Baby Wants To Ride EP" -- bumped +2pt for readability
     "genre_font_size": 39,          # it kept running out of room at the full release_title size
-    "catno_font_size": 17,          # 0.22x the artist size
+    "catno_font_size": 22,          # bumped from 17pt -- a bit bigger, not much
     "detail_font_size": 48,         # "A1  Baby Wants To Ride" ~= 65% width, bold
     "bpm_font_size": 77,            # 1.6x the detail size
     "highlight_bold": True,         # highlighted tracks' title (and BPM) render bold
     "rating_star_diameter": 26,     # printed star rating icon size
     "rating_star_gap": 6,           # spacing between the 5 star icons
-    "note_font_size": 45,           # detail_font_size - 3pt -- optional note at the label's bottom
+    "note_font_size": 22,           # was 45pt (detail_font_size - 3) -- much too big, per feedback
 }
 
 
