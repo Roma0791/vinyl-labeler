@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vinyl Labeler -- Bulk Edit</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin: 0; padding: 16px; background: #f4f4f5; color: #111;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  a { color: #2563eb; }
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .topbar input[type=text] { flex: 1; min-width: 220px; padding: 8px 10px; font-size: .95rem;
+    border: 1px solid #ccc; border-radius: 8px; }
+  button { font-size: .85rem; padding: 8px 14px; border: none; border-radius: 8px;
+    background: #2563eb; color: #fff; cursor: pointer; }
+  button.secondary { background: #e5e7eb; color: #111; }
+  button.danger { background: #dc2626; color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { font-size: .82rem; color: #666; min-height: 1.2em; }
+  #status.err { color: #991b1b; }
+  .table-wrap { overflow-x: auto; background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; white-space: nowrap; }
+  th, td { border-bottom: 1px solid #eee; border-right: 1px solid #f2f2f2; padding: 6px 8px;
+    text-align: left; vertical-align: top; }
+  th { position: sticky; top: 0; background: #f9fafb; color: #555; font-weight: 600;
+    font-size: .75rem; text-transform: uppercase; letter-spacing: .02em; z-index: 1; }
+  tr.release-start td { border-top: 2px solid #ddd; }
+  td input[type=text], td input[type=number] {
+    width: 100%; min-width: 90px; padding: 4px 6px; font-size: .85rem;
+    border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #111;
+  }
+  td input[type=text].wide { min-width: 160px; }
+  td.readonly { color: #666; }
+  .actions-cell { display: flex; flex-direction: column; gap: 4px; min-width: 90px; }
+  .actions-cell button { width: 100%; }
+  input[type=checkbox] {
+    appearance: none; -webkit-appearance: none; width: 22px; height: 22px;
+    border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; position: relative;
+  }
+  input[type=checkbox]:checked { background: #2563eb; border-color: #2563eb; }
+  input[type=checkbox]:checked::after {
+    content: ""; position: absolute; left: 7px; top: 3px; width: 5px; height: 10px;
+    border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .badge { display: inline-block; font-size: .7rem; padding: 2px 7px; border-radius: 999px; }
+  .badge.high { background: #dcfce7; color: #166534; }
+  .badge.medium { background: #fef9c3; color: #854d0e; }
+  .badge.unconfirmed { background: #fee2e2; color: #991b1b; }
+  .star-rating { display: flex; gap: 1px; touch-action: none; -webkit-user-select: none;
+    user-select: none; -webkit-touch-callout: none; }
+  .star { position: relative; width: 18px; height: 18px; font-size: 18px; line-height: 18px; flex-shrink: 0; }
+  .star-outline { position: absolute; inset: 0; color: #d1d5db; }
+  .star-fill-wrap { position: absolute; inset: 0; overflow: hidden; width: 0%; }
+  .star-fill-glyph { display: block; width: 18px; color: #f59e0b; }
+  .empty-note { padding: 24px; text-align: center; color: #999; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<h1>🗂️ Bulk Edit</h1>
+<div style="margin-bottom:14px;"><a href="/">&larr; back to Vinyl Labeler</a></div>
+
+<div class="topbar">
+  <input type="text" id="search" placeholder="Search artist, title, catalog #, track, note…">
+  <button class="secondary" id="reloadBtn">↻ Reload</button>
+  <span id="rowCount" style="font-size:.82rem; color:#666;"></span>
+</div>
+<div id="status"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr id="headRow"></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+<div id="emptyNote" class="empty-note hidden">No records match.</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// ---- column definitions --------------------------------------------------
+// Known fields get a purpose-built widget (checkbox, stars, a read-only
+// badge/date, etc.) matching how they're shown in the main app. Anything
+// else -- including any field added to records in the future -- falls
+// through to a plain text column, discovered automatically from whatever
+// keys actually show up in the data (see computeColumns). That's what
+// makes this future-proof: a new field needs no change here to appear.
+const KNOWN_RELEASE_FIELDS = {
+  catalog_number:    { label: 'Catalog #', type: 'readonly' },
+  artist:            { label: 'Artist', type: 'text', wide: true },
+  release_title:     { label: 'Release Title', type: 'text', wide: true },
+  print_note:        { label: 'Notes', type: 'text', wide: true },
+  tracklist_confidence: { label: 'Match', type: 'confidence-badge' },
+  print_count:       { label: 'Prints', type: 'readonly' },
+  last_processed_at: { label: 'Last Printed', type: 'readonly-date' },
+};
+// Present on every record but not useful as a bulk-edit column -- internal
+// bookkeeping or vision/Discogs diagnostic text, never shown as a field in
+// the main app's own UI either.
+const HIDDEN_RELEASE_FIELDS = new Set([
+  'tracks', 'discogs_matched', 'legibility', 'notes', 'record_label', 'side',
+  'first_processed_at',
+]);
+
+const KNOWN_TRACK_FIELDS = {
+  position:   { label: 'Pos', type: 'text' },
+  title:      { label: 'Title', type: 'text', wide: true },
+  bpm:        { label: 'BPM', type: 'number' },
+  bpm_source: { label: 'BPM Src', type: 'bpm-badge' },
+  genre:      { label: 'Genre', type: 'text' },
+  highlight:  { label: 'Highlight', type: 'checkbox' },
+  rating:     { label: 'Rating', type: 'stars' },
+};
+const HIDDEN_TRACK_FIELDS = new Set(['beatport_check_url', '_skip_on_label']);
+
+function prettifyKey(k) {
+  return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function computeColumns(knownMap, hiddenSet, items) {
+  const cols = Object.keys(knownMap).map((key) => ({ key, ...knownMap[key] }));
+  const seen = new Set(cols.map((c) => c.key));
+  items.forEach((item) => {
+    Object.keys(item || {}).forEach((k) => {
+      if (!seen.has(k) && !hiddenSet.has(k)) {
+        seen.add(k);
+        cols.push({ key: k, label: prettifyKey(k), type: 'text' });
+      }
+    });
+  });
+  return cols;
+}
+
+// ---- state ----------------------------------------------------------------
+let records = [];
+let releaseColumns = [];
+let trackColumns = [];
+
+async function loadCatalogue() {
+  setStatus('Loading…');
+  try {
+    const resp = await fetch('/catalogue/full');
+    if (!resp.ok) throw new Error(await resp.text());
+    records = await resp.json();
+    // Alphabetical by artist then release title -- easiest default to scan
+    // a personal collection by; not user-configurable yet.
+    records.sort((a, b) => {
+      const ka = `${a.artist || ''} ${a.release_title || ''}`.toLowerCase();
+      const kb = `${b.artist || ''} ${b.release_title || ''}`.toLowerCase();
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    });
+    releaseColumns = computeColumns(KNOWN_RELEASE_FIELDS, HIDDEN_RELEASE_FIELDS, records);
+    trackColumns = computeColumns(KNOWN_TRACK_FIELDS, HIDDEN_TRACK_FIELDS, records.flatMap((r) => r.tracks || []));
+    renderHead();
+    renderTable();
+    setStatus(`Loaded ${records.length} record(s).`);
+  } catch (err) {
+    setStatus('Failed to load: ' + err.message, true);
+  }
+}
+
+function setStatus(text, isError) {
+  $('status').textContent = text;
+  $('status').classList.toggle('err', !!isError);
+}
+
+function renderHead() {
+  const tr = $('headRow');
+  tr.innerHTML = '';
+  releaseColumns.forEach((col) => {
+    const th = document.createElement('th');
+    th.textContent = col.label;
+    tr.appendChild(th);
+  });
+  trackColumns.forEach((col) => {
+    const th = document.createElement('th');
+    th.textContent = col.label;
+    tr.appendChild(th);
+  });
+  const th = document.createElement('th');
+  th.textContent = 'Actions';
+  tr.appendChild(th);
+}
+
+// ---- star widget (mirrors the main app's -- same classes, same drag-to-
+// fill behaviour) -- saves only once the drag/tap ends, not on every
+// pointermove, so dragging across the row doesn't spam the server. ----
+function starFillPercent(rating, starIndex) {
+  const diff = (rating || 0) - (starIndex - 1);
+  if (diff >= 1) return 100;
+  if (diff >= 0.5) return 50;
+  return 0;
+}
+
+function buildStarWidget(obj, key, onCommitted) {
+  const container = document.createElement('div');
+  container.className = 'star-rating';
+  const stars = [];
+  for (let k = 0; k < 5; k++) {
+    const star = document.createElement('span');
+    star.className = 'star';
+    star.innerHTML = '<span class="star-outline">★</span>' +
+      '<span class="star-fill-wrap"><span class="star-fill-glyph">★</span></span>';
+    container.appendChild(star);
+    stars.push(star);
+  }
+  function refresh() {
+    stars.forEach((star, idx) => {
+      star.querySelector('.star-fill-wrap').style.width = starFillPercent(obj[key], idx + 1) + '%';
+    });
+  }
+  refresh();
+
+  let dragging = false;
+  const applyFromX = (clientX) => {
+    const rect = container.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    obj[key] = Math.round(frac * 5 * 2) / 2;
+    refresh();
+  };
+  container.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    try { container.setPointerCapture(e.pointerId); } catch (err) { /* non-fatal */ }
+    applyFromX(e.clientX);
+  });
+  container.addEventListener('pointermove', (e) => { if (dragging) applyFromX(e.clientX); });
+  const stop = () => { if (dragging) { dragging = false; onCommitted(); } };
+  container.addEventListener('pointerup', stop);
+  container.addEventListener('pointercancel', stop);
+  return container;
+}
+
+function confidenceBadgeClass(conf) {
+  if (conf === 'catalog_number') return 'high';
+  if (conf === 'artist_title') return 'medium';
+  return 'unconfirmed';
+}
+
+function bpmBadgeClass(src) {
+  if (['printed_on_label', 'discogs_notes', 'audio_analysis', 'manual'].includes(src)) return 'high';
+  if (src === 'getsongbpm') return 'medium';
+  return 'unconfirmed';
+}
+
+// ---- cell rendering ---------------------------------------------------
+// `obj` holds the field (a record for release columns, a track for track
+// columns); `saveTarget` is always the whole record that needs to be
+// POSTed back, since /catalogue saves one full record at a time.
+function renderCell(obj, col, saveTarget) {
+  const td = document.createElement('td');
+
+  if (col.type === 'readonly') {
+    td.textContent = obj[col.key] ?? '';
+    td.className = 'readonly';
+    return td;
+  }
+  if (col.type === 'readonly-date') {
+    const v = obj[col.key];
+    td.textContent = v ? new Date(v).toLocaleString() : '—';
+    td.className = 'readonly';
+    return td;
+  }
+  if (col.type === 'confidence-badge') {
+    const span = document.createElement('span');
+    const conf = obj[col.key] || 'none';
+    span.className = 'badge ' + confidenceBadgeClass(conf);
+    span.textContent = conf;
+    td.appendChild(span);
+    return td;
+  }
+  if (col.type === 'bpm-badge') {
+    const span = document.createElement('span');
+    const src = obj[col.key] || 'none';
+    span.className = 'badge ' + bpmBadgeClass(src);
+    span.textContent = src;
+    td.appendChild(span);
+    return td;
+  }
+  if (col.type === 'checkbox') {
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !!obj[col.key];
+    input.addEventListener('change', () => {
+      obj[col.key] = input.checked;
+      saveRecord(saveTarget);
+    });
+    td.appendChild(input);
+    return td;
+  }
+  if (col.type === 'stars') {
+    td.appendChild(buildStarWidget(obj, col.key, () => saveRecord(saveTarget)));
+    return td;
+  }
+  if (col.type === 'number') {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.1';
+    input.value = obj[col.key] ?? '';
+    input.addEventListener('change', () => {
+      obj[col.key] = input.value === '' ? null : parseFloat(input.value);
+      if (col.key === 'bpm') obj.bpm_source = 'manual';  // matches the main review screen's own rule
+      saveRecord(saveTarget);
+    });
+    td.appendChild(input);
+    return td;
+  }
+  // text (known or auto-discovered)
+  const input = document.createElement('input');
+  input.type = 'text';
+  if (col.wide) input.className = 'wide';
+  input.value = obj[col.key] ?? '';
+  input.addEventListener('change', () => {
+    obj[col.key] = input.value;
+    saveRecord(saveTarget);
+  });
+  td.appendChild(input);
+  return td;
+}
+
+function renderActionsCell(record) {
+  const td = document.createElement('td');
+  const wrap = document.createElement('div');
+  wrap.className = 'actions-cell';
+
+  const printBtn = document.createElement('button');
+  printBtn.textContent = '🖨️ Print';
+  printBtn.addEventListener('click', async () => {
+    printBtn.disabled = true;
+    try {
+      const resp = await fetch('/print', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record, label_size: '62', highlights_only: false }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      setStatus(`Printed ${record.catalog_number} (print #${data.print_count}).`);
+      await loadCatalogue();
+    } catch (err) {
+      setStatus('Print failed: ' + err.message, true);
+    } finally {
+      printBtn.disabled = false;
+    }
+  });
+
+  const queueBtn = document.createElement('button');
+  queueBtn.className = 'secondary';
+  queueBtn.textContent = '📥 Queue';
+  queueBtn.addEventListener('click', async () => {
+    queueBtn.disabled = true;
+    try {
+      const resp = await fetch('/queue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ record, label_size: '62', style: {}, highlights_only: false }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      setStatus(`Queued ${record.catalog_number}.`);
+    } catch (err) {
+      setStatus('Queue failed: ' + err.message, true);
+    } finally {
+      queueBtn.disabled = false;
+    }
+  });
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'danger';
+  deleteBtn.textContent = '✕ Delete';
+  deleteBtn.addEventListener('click', async () => {
+    if (!confirm(`Delete ${record.catalog_number} from the catalogue? This can't be undone.`)) return;
+    deleteBtn.disabled = true;
+    try {
+      const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(record.catalog_number), { method: 'DELETE' });
+      if (!resp.ok) throw new Error(await resp.text());
+      setStatus(`Deleted ${record.catalog_number}.`);
+      await loadCatalogue();
+    } catch (err) {
+      setStatus('Delete failed: ' + err.message, true);
+      deleteBtn.disabled = false;
+    }
+  });
+
+  wrap.appendChild(printBtn);
+  wrap.appendChild(queueBtn);
+  wrap.appendChild(deleteBtn);
+  td.appendChild(wrap);
+  return td;
+}
+
+async function saveRecord(record) {
+  try {
+    const resp = await fetch('/catalogue', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const saved = await resp.json();
+    // Only pull in the bookkeeping fields the server computes -- NOT a
+    // blanket Object.assign(record, saved). That would replace
+    // record.tracks with a freshly-parsed array of brand-new objects,
+    // silently detaching every already-rendered input/checkbox/star
+    // widget's closure (each holds a direct reference to the specific
+    // track object it edits) from the record's actual current state. A
+    // later edit through one of those now-stale closures would then
+    // mutate an orphaned object that nothing ever saves again -- found
+    // this exact way: a highlight checkbox toggle appeared to work (DOM
+    // updated, a save even fired) but silently never reached the server
+    // because a prior save on the same record had already swapped
+    // record.tracks out from under it.
+    record.first_processed_at = saved.first_processed_at;
+    record.last_processed_at = saved.last_processed_at;
+    record.print_count = saved.print_count;
+    setStatus(`Saved ${record.catalog_number} at ${new Date().toLocaleTimeString()}.`);
+  } catch (err) {
+    setStatus('Save failed: ' + err.message, true);
+  }
+}
+
+function renderTable() {
+  const tbody = $('tbody');
+  tbody.innerHTML = '';
+  const query = $('search').value.trim().toLowerCase();
+  let shownReleases = 0;
+
+  records.forEach((record) => {
+    if (query && !JSON.stringify(record).toLowerCase().includes(query)) return;
+    shownReleases++;
+
+    // A release with zero tracks still gets one row so its release-level
+    // fields are reachable and editable.
+    const tracks = record.tracks && record.tracks.length ? record.tracks : [{}];
+    tracks.forEach((track, i) => {
+      const tr = document.createElement('tr');
+      if (i === 0) tr.className = 'release-start';
+      if (i === 0) {
+        releaseColumns.forEach((col) => tr.appendChild(withRowspan(renderCell(record, col, record), tracks.length)));
+      }
+      trackColumns.forEach((col) => tr.appendChild(renderCell(track, col, record)));
+      if (i === 0) tr.appendChild(withRowspan(renderActionsCell(record), tracks.length));
+      tbody.appendChild(tr);
+    });
+  });
+
+  $('rowCount').textContent = `${shownReleases} of ${records.length} record(s)`;
+  $('emptyNote').classList.toggle('hidden', shownReleases !== 0);
+}
+
+function withRowspan(td, n) {
+  if (n > 1) td.rowSpan = n;
+  return td;
+}
+
+$('search').addEventListener('input', renderTable);
+$('reloadBtn').addEventListener('click', loadCatalogue);
+
+loadCatalogue();
+</script>
+</body>
+</html>

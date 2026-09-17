@@ -51,6 +51,15 @@ def index():
     return (STATIC_DIR / "index.html").read_text()
 
 
+@app.get("/bulk", response_class=HTMLResponse)
+def bulk_edit_page():
+    """Separate page (not a tab in the phone-facing SPA) -- a wide,
+    scrollable table is a desktop/laptop-on-the-LAN thing, not a phone
+    thing, so it gets its own unconstrained layout rather than squeezing
+    into index.html's 640px mobile-first column."""
+    return (STATIC_DIR / "bulk.html").read_text()
+
+
 @app.get("/label-sizes")
 def list_label_sizes():
     """Populates the label-type dropdown from whatever this brother_ql
@@ -390,6 +399,30 @@ def list_catalogue():
     # None or this raises comparing against other rows' timestamp strings.
     rows.sort(key=lambda r: r["last_processed_at"], reverse=True)
     return rows
+
+
+@app.get("/catalogue/full")
+def list_catalogue_full():
+    """Full records (including every track and every field, whatever they
+    happen to be) for the bulk-edit table -- deliberately the opposite of
+    /catalogue's light summary rows. Returned as a list rather than the
+    on-disk catalog_number-keyed dict since catalog_number is already a
+    field on each record and a list is what the table iterates."""
+    return list(store.load_all(cfg.catalogue_path).values())
+
+
+class SaveRecordRequest(BaseModel):
+    record: dict
+
+
+@app.post("/catalogue")
+def save_catalogue_record(req: SaveRecordRequest):
+    """Saves a bulk-edited record as-is -- no Discogs/BPM re-resolution,
+    unlike /enrich. count_as_print=False since editing a field isn't
+    printing it."""
+    if not req.record.get("catalog_number"):
+        raise HTTPException(400, "Record has no catalog_number.")
+    return store.upsert(cfg.catalogue_path, req.record, count_as_print=False)
 
 
 @app.get("/catalogue/lookup")
