@@ -212,6 +212,15 @@
   </div>
 </div>
 
+<div id="duplicateFoundModal" class="modal-overlay hidden">
+  <div style="background:#fff; border-radius:12px; padding:20px; max-width:340px; width:100%;">
+    <div style="font-weight:600; margin-bottom:8px;">This one's already in your library</div>
+    <div id="duplicateFoundDetail" style="color:#555; font-size:.9rem; margin-bottom:14px;"></div>
+    <button id="duplicateFoundLoad">📂 Load Existing Entry</button>
+    <button class="secondary" id="duplicateFoundKeepNew" style="margin-top:8px;">🆕 Keep This New Scan</button>
+  </div>
+</div>
+
 <script>
 let record = null;
 // Set while editing an existing catalogue entry (Library/Queue -> Edit).
@@ -220,14 +229,18 @@ let record = null;
 // this was supposed to update an existing entry -- producing a stray
 // duplicate catalogue row instead of updating the one being edited.
 let editingCatalogNumber = null;
-// Set only when the record being edited was opened via Queue -> Edit
-// (null for Library -> Edit or a fresh record). If the user then hits
-// Print Now (bypassing the queue's own Print button, which removes the
-// job itself via /queue/{id}/print), this job would otherwise sit behind
-// in the queue forever even though it's already been printed -- printBtn
-// removes it directly by this id after a successful real print. Keyed by
-// job id rather than catalog_number so it still finds the right job even
-// if the catalog number changed during editing.
+// Set by loadRecordForEdit (via findQueueJobId) whenever the record being
+// edited happens to already be sitting in the queue -- regardless of
+// whether it was opened from the Library tab or the Queue tab itself, since
+// the same catalog number can be reached either way. If the user then hits
+// Print Now (bypassing the queue's own Print button, which removes the job
+// itself via /queue/{id}/print), this job would otherwise sit behind in the
+// queue forever even though it's already been printed -- printBtn removes
+// it directly by this id after a successful real print. Keyed by job id
+// rather than catalog_number so it still finds the right job even if the
+// catalog number changed during editing. Null when the record isn't
+// queued at all (a fresh scan/manual entry, or a Library edit of a record
+// that was never queued).
 let editingQueueJobId = null;
 // Index of the track whose BPM controls (source badge, octave buttons, tap
 // tempo, audio sample, Beatport link) are currently expanded, or null if
@@ -352,7 +365,7 @@ function renderQueueRows(jobs) {
       <div class="lib-sub">${r.catalog_number || ''} · queued ${queuedAt}</div>
       <div class="row2" style="margin-top:8px;">
         <button class="small printQueueBtn" data-id="${job.id}">🖨️ Print</button>
-        <button class="small secondary editQueueBtn" data-catno="${r.catalog_number}" data-job-id="${job.id}">✏️ Edit</button>
+        <button class="small secondary editQueueBtn" data-catno="${r.catalog_number}">✏️ Edit</button>
       </div>
       <button class="small danger removeQueueBtn" data-id="${job.id}" style="margin-top:6px;">✕ Remove</button>
     `;
@@ -362,7 +375,7 @@ function renderQueueRows(jobs) {
     btn.addEventListener('click', () => printQueueJob(btn.dataset.id));
   });
   container.querySelectorAll('.editQueueBtn').forEach(btn => {
-    btn.addEventListener('click', () => loadRecordForEdit(btn.dataset.catno, btn.dataset.jobId));
+    btn.addEventListener('click', () => loadRecordForEdit(btn.dataset.catno));
   });
   container.querySelectorAll('.removeQueueBtn').forEach(btn => {
     btn.addEventListener('click', () => removeQueueJob(btn.dataset.id));
@@ -408,14 +421,32 @@ $('printAllQueueBtn').addEventListener('click', async () => {
   }
 });
 
-async function loadRecordForEdit(catalogNumber, queueJobId) {
+// Finds the queue job (if any) for a catalog number, regardless of how the
+// record being edited was reached -- Library search and Queue -> Edit both
+// go through loadRecordForEdit, and a record can be sitting in the queue
+// no matter which tab you found it from. Looking this up live rather than
+// trusting the caller to know means editing the same record via Library
+// still correctly clears its queue entry on a direct print.
+async function findQueueJobId(catalogNumber) {
+  try {
+    const resp = await fetch('/queue');
+    if (!resp.ok) return null;
+    const jobs = await resp.json();
+    const match = jobs.find(j => j.catalog_number === catalogNumber);
+    return match ? match.id : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadRecordForEdit(catalogNumber) {
   showSpinner(true);
   try {
     const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(catalogNumber));
     if (!resp.ok) throw new Error(await resp.text());
     record = await resp.json();
     editingCatalogNumber = catalogNumber;
-    editingQueueJobId = queueJobId || null;
+    editingQueueJobId = await findQueueJobId(catalogNumber);
     (record.tracks || []).forEach(t => { if (t.highlight === undefined) t.highlight = false; });
     renderReview();
     switchTab('new');
@@ -480,6 +511,7 @@ async function runIdentify(file) {
     });
     if (!enrichResp.ok) throw new Error(await enrichResp.text());
     record = await enrichResp.json();
+    await checkForExistingRecord();
 
     renderReview();
     $('retryIdentifyBtn').classList.remove('hidden');
@@ -527,6 +559,7 @@ $('manualSearchBtn').addEventListener('click', async () => {
     });
     if (!enrichResp.ok) throw new Error(await enrichResp.text());
     record = await enrichResp.json();
+    await checkForExistingRecord();
     (record.tracks || []).forEach(t => { if (t.highlight === undefined) t.highlight = false; });
     renderReview();
     $('manualEntryForm').classList.add('hidden');
@@ -1023,6 +1056,63 @@ function askPrintChoice() {
     $('printChoiceQueue').onclick = () => cleanup('queue');
     $('printChoiceCancel').onclick = () => cleanup('cancel');
   });
+}
+
+// Resolves to 'load_existing' | 'keep_new'.
+function askDuplicateChoice(existing, statusLine) {
+  return new Promise((resolve) => {
+    $('duplicateFoundDetail').textContent =
+      `${existing.artist || '(unknown artist)'} – ${existing.release_title || '(untitled)'} ` +
+      `(${existing.catalog_number}) is already saved -- ${statusLine}.`;
+    const modal = $('duplicateFoundModal');
+    modal.classList.remove('hidden');
+    const cleanup = (result) => { modal.classList.add('hidden'); resolve(result); };
+    $('duplicateFoundLoad').onclick = () => cleanup('load_existing');
+    $('duplicateFoundKeepNew').onclick = () => cleanup('keep_new');
+  });
+}
+
+// After a fresh scan/search resolves a catalog number, check whether it's
+// already saved -- easy to pick up a record that's sitting in the print
+// queue (or already printed before) without checking first, especially
+// working through a stack of physical records faster than the queue
+// empties. Offers to load the existing entry, keeping whatever BPM/
+// rating/highlight work was already done on it, instead of silently
+// starting a second, disconnected copy that would only converge with it
+// at commit time via the catalog-number upsert -- by then, any edits made
+// on this fresh scan would've clobbered the existing ones with no warning
+// they were about to. Skipped when the scan resolves back to the record
+// already being edited (editingCatalogNumber) -- that's an expected
+// re-confirmation, not a surprise duplicate.
+async function checkForExistingRecord() {
+  const catno = record.catalog_number;
+  if (!catno || catno === editingCatalogNumber) return;
+
+  let existing;
+  try {
+    const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(catno));
+    if (!resp.ok) return;  // 404 -- genuinely new, nothing to warn about
+    existing = await resp.json();
+  } catch {
+    return;
+  }
+
+  const queueJobId = await findQueueJobId(catno);
+  const statusLine = queueJobId
+    ? 'still in the print queue, not yet printed'
+    : existing.print_count
+      ? `printed ${existing.print_count} time(s), last on ${existing.last_processed_at ? new Date(existing.last_processed_at).toLocaleString() : 'unknown date'}`
+      : 'saved but not yet printed';
+
+  const choice = await askDuplicateChoice(existing, statusLine);
+  if (choice === 'load_existing') {
+    record = existing;
+    editingCatalogNumber = catno;
+    editingQueueJobId = queueJobId;
+  }
+  // 'keep_new' -- leave the freshly-scanned record as-is; committing it
+  // will overwrite the existing catalogue entry (and update the queue job
+  // in place, if any) via the normal upsert path, same as always.
 }
 
 $('printBtn').addEventListener('click', async () => {
