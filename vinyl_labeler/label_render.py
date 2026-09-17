@@ -42,8 +42,8 @@ FONT_VARIATION = {"regular": b"Regular", "bold": b"Bold"}
 
 # Fixed point sizes, calibrated once against the mock EP (see module docstring).
 DEFAULT_STYLE = {
-    "artist_font_size": 77,         # "Frankie Knuckles" ~= 80% of a 62mm label's width, bold
-                                     # (was 79pt -- trimmed 2pt on request)
+    "artist_font_size": 72,         # "Frankie Knuckles" ~= 80% of a 62mm label's width, bold
+                                     # (down from 79pt across a couple of rounds of feedback)
     "release_title_font_size": 45,  # "– Baby Wants To Ride EP" -- bumped +2pt for readability
     "genre_font_size": 39,          # it kept running out of room at the full release_title size
     "catno_font_size": 22,          # bumped from 17pt -- a bit bigger, not much
@@ -52,7 +52,7 @@ DEFAULT_STYLE = {
     "highlight_bold": True,         # highlighted tracks' title (and BPM) render bold
     "rating_star_diameter": 26,     # printed star rating icon size
     "rating_star_gap": 6,           # spacing between the 5 star icons
-    "note_font_size": 22,           # was 45pt (detail_font_size - 3) -- much too big, per feedback
+    "note_font_size": 30,           # settled here after a round of graphic-only previews
 }
 
 
@@ -355,10 +355,18 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
     img = Image.new("1", (width, height), color=1)  # 1-bit, white background
     draw = ImageDraw.Draw(img)
 
+    # content_bottom tracks the true bottom (real ink, no trailing gap) of
+    # whatever was actually drawn last -- used at the end to trim the
+    # canvas so the bottom margin matches MARGIN_PX exactly, the same as
+    # the top. `y` is a separate running cursor that *does* include the
+    # forward-looking gap before the next block, since that's what
+    # positions it.
     y = MARGIN_PX
+    content_bottom = y
     for text, font, size, align in header_lines:
         x = width - MARGIN_PX - draw.textlength(text, font=font) if align == "right" else MARGIN_PX
         draw.text((x, y), text, font=font, fill=0)
+        content_bottom = draw.textbbox((x, y), text, font=font)[3]
         y += _line_height(size) + _gap(size)
 
     for p in row_plan:
@@ -405,10 +413,24 @@ def render_label(record: dict, label_size: str, style: dict = None) -> Image.Ima
         star_bottom = star_top + d
 
         bpm_bottom = draw.textbbox((width - MARGIN_PX - bpm_w, bpm_y), bpm_str, font=p["bpm_font"])[3]
-        y = max(star_bottom, bpm_bottom) + _gap(s["bpm_font_size"])
+        content_bottom = max(star_bottom, bpm_bottom)
+        y = content_bottom + _gap(s["bpm_font_size"])
 
     for line in note_lines:
         draw.text((MARGIN_PX, y), line, font=note_font, fill=0)
+        content_bottom = draw.textbbox((MARGIN_PX, y), line, font=note_font)[3]
         y += _line_height(s["note_font_size"]) + _gap(s["note_font_size"])
+
+    # Trim the canvas to the real content, not the generous upper-bound
+    # estimate used to size it -- that estimate exists to guarantee
+    # drawing never runs out of room (see the row/star/note height
+    # comments above), not to describe the actual result, and the gap
+    # between "generous" and "actual" was showing up as dead space at the
+    # bottom of every label. Bottom margin ends up exactly MARGIN_PX, the
+    # same as the top -- below the last note line if there is one, or
+    # below the last track's stars if not. Die-cut sizes keep their fixed
+    # physical height untouched; only continuous tape adjusts.
+    if not fixed_h:
+        img = img.crop((0, 0, width, content_bottom + MARGIN_PX))
 
     return img
