@@ -59,17 +59,6 @@
   .star-fill-glyph { display: block; width: 18px; color: #f59e0b; }
   .empty-note { padding: 24px; text-align: center; color: #999; }
   .hidden { display: none; }
-  tr.dirty td { background: #fffbea; }
-  tr.dirty.release-start td { border-top-color: #f59e0b; }
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 50;
-    display: flex; align-items: center; justify-content: center; padding: 16px; }
-  .modal-overlay.hidden { display: none; }
-  .modal-box { background: #fff; border-radius: 12px; padding: 20px; max-width: 420px; width: 100%; }
-  .modal-box h3 { margin: 0 0 8px; font-size: 1.05rem; }
-  .modal-box .modal-list { max-height: 160px; overflow-y: auto; font-size: .82rem; color: #555;
-    background: #f9fafb; border-radius: 8px; padding: 8px 10px; margin: 10px 0; white-space: normal; }
-  .modal-box .modal-actions { display: flex; gap: 8px; margin-top: 14px; }
-  .modal-box .modal-actions button { flex: 1; }
 </style>
 </head>
 <body>
@@ -79,23 +68,10 @@
 
 <div class="topbar">
   <input type="text" id="search" placeholder="Search artist, title, catalog #, track, note…">
-  <button id="saveAllBtn" disabled>💾 Save All</button>
   <button class="secondary" id="reloadBtn">↻ Reload</button>
   <span id="rowCount" style="font-size:.82rem; color:#666;"></span>
 </div>
 <div id="status"></div>
-
-<div id="saveAllModal" class="modal-overlay hidden">
-  <div class="modal-box">
-    <h3>Save all pending edits?</h3>
-    <div id="saveAllSummary"></div>
-    <div id="saveAllList" class="modal-list"></div>
-    <div class="modal-actions">
-      <button id="saveAllConfirm">💾 Save</button>
-      <button class="secondary" id="saveAllCancel">Cancel</button>
-    </div>
-  </div>
-</div>
 
 <div class="table-wrap">
   <table>
@@ -165,43 +141,6 @@ function computeColumns(knownMap, hiddenSet, items) {
 let records = [];
 let releaseColumns = [];
 let trackColumns = [];
-
-// Edits no longer save individually on blur/change -- with the same note
-// text going into many rows in a row, that meant one network round-trip
-// per field. Instead a field edit just mutates the in-memory record and
-// marks it dirty (tracked by catalog_number, visually flagged on its
-// row(s)); nothing reaches the server until Save All, which asks for
-// confirmation first and reports on the whole batch at once.
-let dirtyCatalogNumbers = new Set();
-let releaseRowRefs = new Map();  // catalog_number -> [<tr>, ...] for that release
-
-function markDirty(record) {
-  dirtyCatalogNumbers.add(record.catalog_number);
-  (releaseRowRefs.get(record.catalog_number) || []).forEach((tr) => tr.classList.add('dirty'));
-  updateSaveAllButton();
-}
-
-function clearDirty(catalogNumber) {
-  dirtyCatalogNumbers.delete(catalogNumber);
-  (releaseRowRefs.get(catalogNumber) || []).forEach((tr) => tr.classList.remove('dirty'));
-  updateSaveAllButton();
-}
-
-function updateSaveAllButton() {
-  const n = dirtyCatalogNumbers.size;
-  $('saveAllBtn').textContent = n > 0 ? `💾 Save All (${n})` : '💾 Save All';
-  $('saveAllBtn').disabled = n === 0;
-}
-
-// Print and Delete both reload the whole catalogue from the server on
-// success, which would silently discard any *other* records' pending
-// (unsaved) edits still sitting in memory. Used to gate those two actions
-// behind an extra warning when that's actually at stake.
-function otherDirtyCount(excludingCatalogNumber) {
-  let n = dirtyCatalogNumbers.size;
-  if (dirtyCatalogNumbers.has(excludingCatalogNumber)) n -= 1;
-  return n;
-}
 
 async function loadCatalogue() {
   setStatus('Loading…');
@@ -349,13 +288,13 @@ function renderCell(obj, col, saveTarget) {
     input.checked = !!obj[col.key];
     input.addEventListener('change', () => {
       obj[col.key] = input.checked;
-      markDirty(saveTarget);
+      saveRecord(saveTarget);
     });
     td.appendChild(input);
     return td;
   }
   if (col.type === 'stars') {
-    td.appendChild(buildStarWidget(obj, col.key, () => markDirty(saveTarget)));
+    td.appendChild(buildStarWidget(obj, col.key, () => saveRecord(saveTarget)));
     return td;
   }
   if (col.type === 'number') {
@@ -366,7 +305,7 @@ function renderCell(obj, col, saveTarget) {
     input.addEventListener('change', () => {
       obj[col.key] = input.value === '' ? null : parseFloat(input.value);
       if (col.key === 'bpm') obj.bpm_source = 'manual';  // matches the main review screen's own rule
-      markDirty(saveTarget);
+      saveRecord(saveTarget);
     });
     td.appendChild(input);
     return td;
@@ -378,7 +317,7 @@ function renderCell(obj, col, saveTarget) {
   input.value = obj[col.key] ?? '';
   input.addEventListener('change', () => {
     obj[col.key] = input.value;
-    markDirty(saveTarget);
+    saveRecord(saveTarget);
   });
   td.appendChild(input);
   return td;
@@ -392,14 +331,6 @@ function renderActionsCell(record) {
   const printBtn = document.createElement('button');
   printBtn.textContent = '🖨️ Print';
   printBtn.addEventListener('click', async () => {
-    // Print always reloads the whole catalogue afterward (to pick up the
-    // new print_count) -- that would silently wipe out any *other*
-    // records' pending Save-All edits still only in memory.
-    const others = otherDirtyCount(record.catalog_number);
-    if (others > 0 && !confirm(
-      `You have unsaved edits on ${others} other record(s) that haven't been Saved yet. ` +
-      `Printing reloads the table and would lose them. Print anyway?`
-    )) return;
     printBtn.disabled = true;
     try {
       const resp = await fetch('/print', {
@@ -440,16 +371,11 @@ function renderActionsCell(record) {
   deleteBtn.className = 'danger';
   deleteBtn.textContent = '✕ Delete';
   deleteBtn.addEventListener('click', async () => {
-    const others = otherDirtyCount(record.catalog_number);
-    const warning = others > 0
-      ? `\n\nYou also have unsaved edits on ${others} other record(s) that haven't been Saved yet -- deleting reloads the table and would lose them.`
-      : '';
-    if (!confirm(`Delete ${record.catalog_number} from the catalogue? This can't be undone.${warning}`)) return;
+    if (!confirm(`Delete ${record.catalog_number} from the catalogue? This can't be undone.`)) return;
     deleteBtn.disabled = true;
     try {
       const resp = await fetch('/catalogue/lookup?catalog_number=' + encodeURIComponent(record.catalog_number), { method: 'DELETE' });
       if (!resp.ok) throw new Error(await resp.text());
-      dirtyCatalogNumbers.delete(record.catalog_number);
       setStatus(`Deleted ${record.catalog_number}.`);
       await loadCatalogue();
     } catch (err) {
@@ -465,80 +391,38 @@ function renderActionsCell(record) {
   return td;
 }
 
-// Posts one record as-is. Used only by Save All now -- individual field
-// edits just call markDirty() and wait for that batch action instead of
-// saving immediately (see the note by dirtyCatalogNumbers above). Throws
-// on failure so the Save All loop can count it as failed rather than
-// silently moving on.
-async function persistRecord(record) {
-  const resp = await fetch('/catalogue', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ record }),
-  });
-  if (!resp.ok) throw new Error(await resp.text());
-  const saved = await resp.json();
-  // Only pull in the bookkeeping fields the server computes -- NOT a
-  // blanket Object.assign(record, saved). That would replace
-  // record.tracks with a freshly-parsed array of brand-new objects,
-  // silently detaching every already-rendered input/checkbox/star
-  // widget's closure (each holds a direct reference to the specific
-  // track object it edits) from the record's actual current state. A
-  // later edit through one of those now-stale closures would then
-  // mutate an orphaned object that nothing ever saves again -- found
-  // this exact way: a highlight checkbox toggle appeared to work (DOM
-  // updated, a save even fired) but silently never reached the server
-  // because a prior save on the same record had already swapped
-  // record.tracks out from under it.
-  record.first_processed_at = saved.first_processed_at;
-  record.last_processed_at = saved.last_processed_at;
-  record.print_count = saved.print_count;
-}
-
-// Resolves to true (proceed) or false (cancelled) -- the clarification
-// step asked for before Save All actually writes anything.
-function confirmSaveAll(catalogNumbers) {
-  return new Promise((resolve) => {
-    $('saveAllSummary').textContent =
-      `${catalogNumbers.length} record(s) have unsaved changes. Save all of them now?`;
-    $('saveAllList').textContent = catalogNumbers.join(', ');
-    const modal = $('saveAllModal');
-    modal.classList.remove('hidden');
-    const cleanup = (result) => { modal.classList.add('hidden'); resolve(result); };
-    $('saveAllConfirm').onclick = () => cleanup(true);
-    $('saveAllCancel').onclick = () => cleanup(false);
-  });
-}
-
-$('saveAllBtn').addEventListener('click', async () => {
-  const catalogNumbers = [...dirtyCatalogNumbers];
-  if (catalogNumbers.length === 0) return;
-  if (!(await confirmSaveAll(catalogNumbers))) return;
-
-  $('saveAllBtn').disabled = true;
-  let ok = 0;
-  const failed = [];
-  for (const catno of catalogNumbers) {
-    const record = records.find((r) => r.catalog_number === catno);
-    if (!record) { clearDirty(catno); continue; }  // no longer in the loaded set (e.g. deleted meanwhile)
-    try {
-      await persistRecord(record);
-      clearDirty(catno);
-      ok++;
-    } catch (err) {
-      failed.push(`${catno} (${err.message})`);
-    }
+async function saveRecord(record) {
+  try {
+    const resp = await fetch('/catalogue', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const saved = await resp.json();
+    // Only pull in the bookkeeping fields the server computes -- NOT a
+    // blanket Object.assign(record, saved). That would replace
+    // record.tracks with a freshly-parsed array of brand-new objects,
+    // silently detaching every already-rendered input/checkbox/star
+    // widget's closure (each holds a direct reference to the specific
+    // track object it edits) from the record's actual current state. A
+    // later edit through one of those now-stale closures would then
+    // mutate an orphaned object that nothing ever saves again -- found
+    // this exact way: a highlight checkbox toggle appeared to work (DOM
+    // updated, a save even fired) but silently never reached the server
+    // because a prior save on the same record had already swapped
+    // record.tracks out from under it.
+    record.first_processed_at = saved.first_processed_at;
+    record.last_processed_at = saved.last_processed_at;
+    record.print_count = saved.print_count;
+    setStatus(`Saved ${record.catalog_number} at ${new Date().toLocaleTimeString()}.`);
+  } catch (err) {
+    setStatus('Save failed: ' + err.message, true);
   }
-  updateSaveAllButton();
-  setStatus(
-    failed.length ? `Saved ${ok}, failed: ${failed.join('; ')}` : `Saved ${ok} record(s).`,
-    failed.length > 0
-  );
-});
+}
 
 function renderTable() {
   const tbody = $('tbody');
   tbody.innerHTML = '';
-  releaseRowRefs = new Map();  // old <tr> elements are gone; rebuild the index fresh
   const query = $('search').value.trim().toLowerCase();
   let shownReleases = 0;
 
@@ -546,7 +430,6 @@ function renderTable() {
     if (query && !JSON.stringify(record).toLowerCase().includes(query)) return;
     shownReleases++;
 
-    const rowsForRelease = [];
     // A release with zero tracks still gets one row so its release-level
     // fields are reachable and editable.
     const tracks = record.tracks && record.tracks.length ? record.tracks : [{}];
@@ -558,15 +441,8 @@ function renderTable() {
       }
       trackColumns.forEach((col) => tr.appendChild(renderCell(track, col, record)));
       if (i === 0) tr.appendChild(withRowspan(renderActionsCell(record), tracks.length));
-      // Re-render (e.g. from typing in Search) tears down and rebuilds
-      // every <tr>, so a still-dirty release needs its highlight
-      // reapplied here rather than relying on the class surviving --
-      // dirtyCatalogNumbers is what persists across renders, not the DOM.
-      if (dirtyCatalogNumbers.has(record.catalog_number)) tr.classList.add('dirty');
-      rowsForRelease.push(tr);
       tbody.appendChild(tr);
     });
-    releaseRowRefs.set(record.catalog_number, rowsForRelease);
   });
 
   $('rowCount').textContent = `${shownReleases} of ${records.length} record(s)`;
@@ -579,22 +455,7 @@ function withRowspan(td, n) {
 }
 
 $('search').addEventListener('input', renderTable);
-$('reloadBtn').addEventListener('click', () => {
-  if (dirtyCatalogNumbers.size > 0 && !confirm(
-    `You have unsaved edits on ${dirtyCatalogNumbers.size} record(s). Reloading discards them. Reload anyway?`
-  )) return;
-  loadCatalogue();
-});
-
-// Closing/navigating away with pending edits is the other way to lose
-// them silently -- the browser's own generic prompt is all a beforeunload
-// handler can show (custom text is ignored by modern browsers), but
-// showing *some* prompt beats none.
-window.addEventListener('beforeunload', (e) => {
-  if (dirtyCatalogNumbers.size === 0) return;
-  e.preventDefault();
-  e.returnValue = '';
-});
+$('reloadBtn').addEventListener('click', loadCatalogue);
 
 loadCatalogue();
 </script>
