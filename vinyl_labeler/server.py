@@ -9,7 +9,12 @@ Run with:
 
 Then open http://<your-mac's-lan-ip>:8000 in Safari on your phone (same
 Wi-Fi network as the Mac). Find the Mac's LAN IP with:
-    ipconfig getifaddr en0
+    ipconfig getifaddr en0   # Wi-Fi on most Macs
+    ipconfig getifaddr en1   # ...but Wi-Fi on some (e.g. when en0 is a
+                             # wired/Thunderbolt port instead) -- check
+                             # System Settings > Wi-Fi > Details for the
+                             # actual device name if neither returns an
+                             # address
 
 Uses a plain <input type=file capture> for the camera rather than the
 getUserMedia live-camera API, specifically so this works over plain HTTP on
